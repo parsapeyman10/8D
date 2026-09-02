@@ -30,10 +30,11 @@ function getConfig() {
       provider: c.provider || 'cloud',
       apiKey: c.apiKey || localStorage.getItem('deepseek_api_key') || '',
       baseUrl: c.baseUrl || '',
+      bridgeUrl: c.bridgeUrl || '',
       chatModel: c.chatModel || '',
       reasonerModel: c.reasonerModel || '',
     };
-  } catch { return { provider: 'cloud', apiKey: '', baseUrl: '', chatModel: '', reasonerModel: '' }; }
+  } catch { return { provider: 'cloud', apiKey: '', baseUrl: '', bridgeUrl: '', chatModel: '', reasonerModel: '' }; }
 }
 function saveConfig(c) { localStorage.setItem('llm_config', JSON.stringify(c)); }
 function getKey() { return getConfig().apiKey; }
@@ -41,7 +42,7 @@ function getKey() { return getConfig().apiKey; }
 function configReady() {
   const c = getConfig();
   if (c.provider === 'demo') return true;
-  if (c.provider === 'local') return true; // key not required
+  if (c.provider === 'local' || c.provider === 'bridge') return true; // key not required
   return Boolean(c.apiKey) || serverHasKey;
 }
 
@@ -51,6 +52,7 @@ function refreshKeyStatus() {
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
     c.provider === 'demo' ? 'حالت دمو فعال است'
+    : c.provider === 'bridge' ? 'مرورگر کروم (پل سلنیومی)'
     : c.provider === 'local' ? ('مدل لوکال: ' + (c.baseUrl || 'http://localhost:11434/v1'))
     : ok ? (c.apiKey ? 'DeepSeek ابری (کلید مرورگر)' : 'DeepSeek ابری (کلید سرور)')
     : 'کلید API تنظیم نشده';
@@ -65,7 +67,9 @@ const providerRadios = () => [...document.querySelectorAll('input[name="provider
 const cloudFields = document.getElementById('cloudFields');
 const localFields = document.getElementById('localFields');
 const demoFields = document.getElementById('demoFields');
+const bridgeFields = document.getElementById('bridgeFields');
 const baseUrlInput = document.getElementById('baseUrlInput');
+const bridgeUrlInput = document.getElementById('bridgeUrlInput');
 const chatModelInput = document.getElementById('chatModelInput');
 const reasonerModelInput = document.getElementById('reasonerModelInput');
 
@@ -73,15 +77,17 @@ function syncProviderFields() {
   const p = providerRadios().find(r => r.checked)?.value || 'cloud';
   cloudFields.style.display = p === 'cloud' ? 'block' : 'none';
   localFields.style.display = p === 'local' ? 'block' : 'none';
-  demoFields.style.display = p === 'demo' ? 'block' : 'none';
+  bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
+  if (demoFields) demoFields.style.display = 'none';
 }
 providerRadios().forEach(r => r.addEventListener('change', syncProviderFields));
 
 els.settingsBtn.onclick = () => {
   const c = getConfig();
-  providerRadios().forEach(r => r.checked = (r.value === c.provider));
+  providerRadios().forEach(r => r.checked = (r.value === c.provider) || (c.provider === 'demo' && r.value === 'cloud'));
   els.apiKeyInput.value = c.apiKey;
   baseUrlInput.value = c.baseUrl;
+  if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || '';
   chatModelInput.value = c.chatModel;
   reasonerModelInput.value = c.reasonerModel;
   syncProviderFields();
@@ -90,10 +96,12 @@ els.settingsBtn.onclick = () => {
 els.closeModalBtn.onclick = () => els.settingsModal.classList.remove('show');
 els.saveKeyBtn.onclick = () => {
   const provider = providerRadios().find(r => r.checked)?.value || 'cloud';
+  const apiKey = els.apiKeyInput.value.trim();
   saveConfig({
-    provider,
-    apiKey: els.apiKeyInput.value.trim(),
+    provider: provider === 'cloud' && /^demo$/i.test(apiKey) ? 'demo' : provider,
+    apiKey,
     baseUrl: baseUrlInput.value.trim(),
+    bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : '',
     chatModel: chatModelInput.value.trim(),
     reasonerModel: reasonerModelInput.value.trim(),
   });
@@ -127,10 +135,15 @@ function errorMessage(err, status) {
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   const c = getConfig();
-  headers['x-provider'] = c.provider === 'demo' ? 'cloud' : c.provider;
-  if (c.provider === 'demo') headers['x-deepseek-key'] = 'demo';
-  else if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
-  if (c.baseUrl) headers['x-base-url'] = c.baseUrl;
+  if (c.provider === 'bridge') {
+    headers['x-provider'] = 'local';
+    headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
+  } else {
+    headers['x-provider'] = c.provider === 'demo' ? 'cloud' : c.provider;
+    if (c.provider === 'demo') headers['x-deepseek-key'] = 'demo';
+    else if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
+    if (c.baseUrl) headers['x-base-url'] = c.baseUrl;
+  }
   if (c.chatModel) headers['x-chat-model'] = c.chatModel;
   if (c.reasonerModel) headers['x-reasoner-model'] = c.reasonerModel;
   const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -350,3 +363,94 @@ els.escNewCase.onclick = resetToStart;
 document.querySelectorAll('.examples button').forEach(b => {
   b.onclick = () => { els.symptomInput.value = b.dataset.ex; els.symptomInput.focus(); };
 });
+
+// ---------- Part analysis (Part Name + Part No. -> result) ----------
+const partNameInput = $('partNameInput'), partNoInput = $('partNoInput');
+const partAnalyzeBtn = $('partAnalyzeBtn'), issuesRefreshBtn = $('issuesRefreshBtn');
+const partLoading = $('partLoading'), partResult = $('partResult');
+
+// fill datalist suggestions from the BOM
+fetch('/api/bom').then(r => r.json()).then(d => {
+  const names = [...new Set((d.parts || []).map(p => p.part_name_en || p.part_name_fa).filter(Boolean))];
+  const nos = [...new Set((d.parts || []).flatMap(p => [p.part_no, p.part_code]).filter(Boolean))];
+  $('partNameList').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+  $('partNoList').innerHTML = nos.map(n => `<option value="${esc(n)}">`).join('');
+}).catch(() => {});
+
+function likBadge(l) {
+  const cls = l === 'High' ? 'High' : l === 'Medium' ? 'Medium' : 'Low';
+  const fa = l === 'High' ? 'زیاد' : l === 'Medium' ? 'متوسط' : 'کم';
+  return `<span class="band ${cls}">${fa}</span>`;
+}
+
+async function analyzePart() {
+  const part_name = partNameInput.value.trim();
+  const part_no = partNoInput.value.trim();
+  if (!part_name && !part_no) { showError('حداقل یکی از Part Name یا Part No. را وارد کنید.'); return; }
+  hideError();
+  partLoading.classList.remove('hidden');
+  partAnalyzeBtn.disabled = true;
+  partResult.innerHTML = '';
+  try {
+    const d = await api('/api/part/analyze', { part_name, part_no });
+    let html = '';
+    if (d.bom_match) {
+      html += `<div class="rc"><div class="cause">✅ در BOM پیدا شد: ${esc(d.bom_match.part_name_en || d.bom_match.part_name_fa)}</div>
+        <div class="evidence" dir="ltr" style="text-align:left">Part No: ${esc(d.bom_match.part_no || '-')} | Stock: ${esc(d.bom_match.part_code)}${d.bom_match.qty ? ' | QTY: ' + esc(d.bom_match.qty) : ''}${d.bom_match.size ? ' | ' + esc(d.bom_match.size) : ''}</div>
+        ${d.bom_match.designator ? `<div class="evidence" dir="ltr" style="text-align:left">Refs: ${esc(d.bom_match.designator)}</div>` : ''}</div>`;
+    } else {
+      html += `<div class="rc"><div class="cause">⚠️ این قطعه در BOM فعلی پیدا نشد — تحلیل عمومی انجام می‌شود.</div></div>`;
+    }
+    if (d.known_issues?.length) {
+      for (const cat of d.known_issues) {
+        html += `<h3 style="color:var(--accent);font-size:14.5px;margin:14px 0 6px">📚 ایرادات شناخته‌شده: ${esc(cat.category)} <span style="font-size:11px;color:var(--muted)">(بروزرسانی: ${esc(cat.updated_at)})</span></h3><ul style="padding-right:18px;line-height:2;font-size:13.5px">`;
+        for (const i of cat.issues) {
+          html += `<li><b>${esc(i.issue_fa)}</b><br><span style="color:var(--muted)">علت: ${esc(i.cause_fa)} | تشخیص: ${esc(i.detection_fa)}</span></li>`;
+        }
+        html += '</ul>';
+        if (cat.sources?.length) html += `<div style="font-size:11px;color:var(--muted)" dir="ltr">Sources: ${cat.sources.map(s => `<a href="${esc(s)}" target="_blank" style="color:var(--accent)">${esc(new URL(s).hostname)}</a>`).join(' · ')}</div>`;
+      }
+    } else {
+      html += '<p class="hint">برای این قطعه دسته‌ای در دیتابیس ایرادات ثبت نشده است.</p>';
+    }
+    const a = d.analysis;
+    if (a && !a.unavailable && a.summary) {
+      html += `<h3 style="color:var(--accent);font-size:14.5px;margin:14px 0 6px">🤖 تحلیل مدل</h3><p style="font-size:13.5px;line-height:2">${esc(a.summary)}</p>`;
+      if (a.failure_modes?.length) {
+        html += '<div>' + a.failure_modes.map(f => `<div class="rc"><div class="head"><div class="cause" style="font-size:13.5px">${esc(f.mode)}</div>${likBadge(f.likelihood)}</div><div class="evidence">${esc(f.why || '')}</div></div>`).join('') + '</div>';
+      }
+      if (a.inspection_steps?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">مراحل بازرسی</h3><ol style="padding-right:18px;line-height:2;font-size:13.5px">${a.inspection_steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
+      if (a.process_notes?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">نکات فرآیندی</h3><ul style="padding-right:18px;line-height:2;font-size:13.5px">${a.process_notes.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
+    } else if (a?.unavailable) {
+      html += `<p class="hint">🤖 تحلیل مدل در دسترس نبود (${esc(a.reason || '')}) — نتایج بالا از دیتابیس محلی است.</p>`;
+    } else {
+      html += '<p class="hint">🤖 برای تحلیل مدل، در تنظیمات یکی از حالت‌های ابری/کروم/لوکال را فعال کنید — نتایج بالا از دیتابیس محلی است.</p>';
+    }
+    partResult.innerHTML = html;
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    partLoading.classList.add('hidden');
+    partAnalyzeBtn.disabled = false;
+  }
+}
+
+partAnalyzeBtn.onclick = analyzePart;
+[partNameInput, partNoInput].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') analyzePart(); }));
+
+issuesRefreshBtn.onclick = async () => {
+  hideError();
+  issuesRefreshBtn.disabled = true;
+  issuesRefreshBtn.textContent = '⏳ در حال بروزرسانی...';
+  try {
+    const d = await api('/api/known-issues/refresh', {});
+    const done = (d.results || []).filter(r => r.updated).length;
+    issuesRefreshBtn.textContent = `✅ ${done} دسته بروزرسانی شد (${d.db_updated_at})`;
+  } catch (e) {
+    showError(e.message);
+    issuesRefreshBtn.textContent = '🔄 بروزرسانی دیتابیس ایرادات';
+  } finally {
+    issuesRefreshBtn.disabled = false;
+    setTimeout(() => { issuesRefreshBtn.textContent = '🔄 بروزرسانی دیتابیس ایرادات'; }, 6000);
+  }
+};

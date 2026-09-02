@@ -178,6 +178,28 @@
       <button class="primary" id="startBtn">شروع عیب‌یابی</button>
     </div>
 
+    <!-- Part analysis card -->
+    <div class="card" id="partCard" style="margin-top:16px">
+      <h2>🔎 تحلیل قطعه (Part Name + Part No.)</h2>
+      <p class="hint">نام قطعه و شماره قطعه را وارد کنید — نتیجه: تطبیق با BOM، ایرادات شناخته‌شده از دیتابیس، و تحلیل مدل.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="fld">Part Name
+          <input type="text" id="partNameInput" list="partNameList" placeholder="IC, CAN Tranceiver" dir="ltr" />
+          <datalist id="partNameList"></datalist>
+        </label>
+        <label class="fld">Part No.
+          <input type="text" id="partNoInput" list="partNoList" placeholder="TJA1055T/3" dir="ltr" />
+          <datalist id="partNoList"></datalist>
+        </label>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button class="primary" id="partAnalyzeBtn">تحلیل قطعه</button>
+        <button id="issuesRefreshBtn" title="بروزرسانی دیتابیس ایرادات با کمک مدل">🔄 بروزرسانی دیتابیس ایرادات</button>
+      </div>
+      <div class="loading-row hidden" id="partLoading"><span class="spinner"></span><span>در حال تحلیل قطعه...</span></div>
+      <div id="partResult" style="margin-top:14px"></div>
+    </div>
+
     <!-- Question card -->
     <div class="card hidden" id="questionCard">
       <div class="progress">
@@ -258,13 +280,20 @@
     <h2>تنظیمات مدل</h2>
     <div class="provider-tabs">
       <label><input type="radio" name="provider" value="cloud" checked /> ☁️ API ابری DeepSeek</label>
+      <label><input type="radio" name="provider" value="bridge" /> 🌐 مرورگر کروم — بدون کلید (پل سلنیومی)</label>
       <label><input type="radio" name="provider" value="local" /> 💻 مدل لوکال (Ollama و مشابه)</label>
-      <label><input type="radio" name="provider" value="demo" /> 🎭 حالت دمو</label>
     </div>
 
     <div id="cloudFields">
       <p class="hint">کلید API خود را از <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> دریافت کنید. کلید فقط در مرورگر شما (localStorage) ذخیره می‌شود.</p>
       <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" />
+    </div>
+
+    <div id="bridgeFields" style="display:none">
+      <p class="hint">بدون کلید API: اسکریپت <b dir="ltr">python bridge/deepseek_web_bridge.py</b> را اجرا کنید تا کروم باز شود و از سایت chat.deepseek.com جواب بگیرد (بار اول یک بار لاگین کنید). سپس همین گزینه را ذخیره کنید.</p>
+      <label class="fld">آدرس پل (پیش‌فرض کافی است)
+        <input type="text" id="bridgeUrlInput" placeholder="http://localhost:8765/v1" dir="ltr" />
+      </label>
     </div>
 
     <div id="localFields" style="display:none">
@@ -281,7 +310,7 @@
     </div>
 
     <div id="demoFields" style="display:none">
-      <p class="hint">حالت نمایشی: بدون هیچ اتصالی به مدل، جریان کامل سوال‌ها و گزارش را با داده نمونه نشان می‌دهد.</p>
+      <p class="hint">حالت نمایشی: بدون هیچ اتصالی به مدل، جریان کامل سوال‌ها و گزارش را با داده نمونه نشان می‌دهد. (برای فعال‌سازی، در حالت ابری کلمه demo را به‌جای کلید وارد کنید)</p>
     </div>
 
     <div class="modal-actions">

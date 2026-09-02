@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { TIER1_QUESTION_SELECTOR, TIER2_ANALYZER } from './prompts.js';
+import { TIER1_QUESTION_SELECTOR, TIER2_ANALYZER, PART_ANALYZER, ISSUE_UPDATER } from './prompts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -72,6 +72,7 @@ function loadBomXlsx(file) {
     const refCount = designators ? designators.split(',').filter((s) => s.trim()).length : 0;
     parts.push({
       part_code: String(r[cStock] ?? '').trim() || String(r[cPartNo] ?? '').trim() || `ITEM-${item}`,
+      part_no: String(r[cPartNo] ?? '').trim(),
       part_name_fa: name,
       part_name_en: name,
       system: 'electrical',
@@ -138,6 +139,48 @@ function bomPartsForModel(system) {
     ...(p.qty ? { qty: p.qty } : {}),
     ...(p.notes ? { notes: p.notes } : {}),
   }));
+}
+
+// ---- Known-issues database (per-component failure knowledge, refreshable) ----
+const KNOWN_ISSUES_PATH = process.env.KNOWN_ISSUES_PATH || path.join(__dirname, '..', 'data', 'known_issues.json');
+let KNOWN_ISSUES = { updated_at: '', categories: [] };
+function loadKnownIssues() {
+  try {
+    KNOWN_ISSUES = JSON.parse(fs.readFileSync(KNOWN_ISSUES_PATH, 'utf8'));
+    console.log(`Known-issues DB loaded: ${KNOWN_ISSUES.categories.length} categories (updated ${KNOWN_ISSUES.updated_at})`);
+  } catch (e) {
+    console.warn(`Known-issues DB not loaded: ${e.message}`);
+  }
+}
+loadKnownIssues();
+
+function saveKnownIssues() {
+  KNOWN_ISSUES.updated_at = new Date().toISOString().slice(0, 10);
+  fs.writeFileSync(KNOWN_ISSUES_PATH, JSON.stringify(KNOWN_ISSUES, null, 2), 'utf8');
+}
+
+function issuesForPart(partName, partNo) {
+  const hay = `${partName} ${partNo}`;
+  return (KNOWN_ISSUES.categories || []).filter((c) => {
+    try { return new RegExp(c.match, 'i').test(hay); } catch { return false; }
+  });
+}
+
+function findBomPart(partName, partNo) {
+  const name = (partName || '').toLowerCase().trim();
+  const no = (partNo || '').toLowerCase().trim();
+  let best = null, bestScore = 0;
+  for (const p of BOM) {
+    let score = 0;
+    const pn = (p.part_name_en || p.part_name_fa || '').toLowerCase();
+    const pc = (p.part_code || '').toLowerCase();
+    const rawNo = (p.part_no || '').toLowerCase();
+    if (no && (pc === no || rawNo.includes(no))) score += 3;
+    if (name && pn === name) score += 3;
+    else if (name && (pn.includes(name) || name.includes(pn))) score += 2;
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  return bestScore >= 2 ? best : null;
 }
 
 // quick keyword classifier so the BOM filter works from the first question
@@ -490,6 +533,103 @@ app.get('/api/health', (req, res) => {
 app.get('/api/bom', (req, res) => {
   const system = (req.query.system || '').toString();
   res.json({ total: BOM.length, source: BOM_SOURCE, product: BOM_PRODUCT, parts: system ? bomForSystem(system) : BOM });
+});
+
+// ---- Part analysis: user gives Part Name + Part No. -> result ----
+app.post('/api/part/analyze', async (req, res) => {
+  try {
+    const partName = (req.body?.part_name || '').toString().trim();
+    const partNo = (req.body?.part_no || '').toString().trim();
+    if (!partName && !partNo) return res.status(400).json({ error: 'part_name or part_no required' });
+
+    const bomMatch = findBomPart(partName, partNo);
+    const cats = issuesForPart(
+      partName || bomMatch?.part_name_en || '',
+      partNo || bomMatch?.part_no || bomMatch?.part_code || ''
+    );
+
+    const base = {
+      query: { part_name: partName, part_no: partNo },
+      bom_match: bomMatch,
+      known_issues: cats.map((c) => ({
+        category: c.title_fa,
+        updated_at: c.updated_at,
+        issues: c.issues,
+        sources: c.sources || [],
+      })),
+      db_updated_at: KNOWN_ISSUES.updated_at,
+    };
+
+    // optional model synthesis (skipped in demo or when model unreachable)
+    const cfg = getLlmConfig(req);
+    let analysis = null;
+    if (!cfg.demo && (cfg.apiKey || !cfg.needsKey)) {
+      try {
+        analysis = await callJson({
+          cfg,
+          model: cfg.chatModel,
+          system: PART_ANALYZER,
+          user: JSON.stringify({
+            product: BOM_PRODUCT,
+            part_name: partName || bomMatch?.part_name_en,
+            part_no: partNo || bomMatch?.part_no,
+            bom_match: bomMatch,
+            known_issue_categories: base.known_issues,
+            language: 'fa',
+          }),
+          temperature: 0.1,
+          maxTokens: 2500,
+        });
+      } catch (e) {
+        analysis = { unavailable: true, reason: e.message };
+      }
+    }
+    res.json({ ...base, analysis });
+  } catch (e) {
+    handleError(res, e);
+  }
+});
+
+// ---- Known-issues refresh: keep the DB up to date via the configured model ----
+app.post('/api/known-issues/refresh', async (req, res) => {
+  try {
+    const cfg = getLlmConfig(req);
+    if (cfg.demo) return res.status(400).json({ error: 'demo_mode', detail: 'برای بروزرسانی، مدل واقعی (ابری/کروم/لوکال) لازم است.' });
+    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
+
+    const onlyId = (req.body?.category_id || '').toString().trim();
+    const targets = (KNOWN_ISSUES.categories || []).filter((c) => !onlyId || c.id === onlyId);
+    if (!targets.length) return res.status(404).json({ error: 'category_not_found' });
+
+    const results = [];
+    for (const cat of targets.slice(0, 4)) { // cap per call to keep it fast
+      const parsed = await callJson({
+        cfg,
+        model: cfg.chatModel,
+        system: ISSUE_UPDATER,
+        user: JSON.stringify({
+          category: cat.title_fa,
+          match: cat.match,
+          current_issues: cat.issues,
+          product: BOM_PRODUCT,
+          language: 'fa',
+        }),
+        temperature: 0.1,
+        maxTokens: 2500,
+      });
+      if (parsed && Array.isArray(parsed.issues) && parsed.issues.length) {
+        cat.issues = parsed.issues.filter((i) => i.issue_fa);
+        cat.updated_at = new Date().toISOString().slice(0, 10);
+        results.push({ id: cat.id, updated: true, count: cat.issues.length });
+      } else {
+        results.push({ id: cat.id, updated: false });
+      }
+    }
+    saveKnownIssues();
+    res.json({ ok: true, results, db_updated_at: KNOWN_ISSUES.updated_at });
+  } catch (e) {
+    handleError(res, e);
+  }
 });
 
 app.post('/api/session/start', async (req, res) => {
