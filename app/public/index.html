@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>دستیار عیب‌یابی هدایت‌شده</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-2: #0ea5e9;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Vazirmatn", "Segoe UI", Tahoma, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 18px; margin: 0; display:flex; align-items:center; gap:10px; }
+  header h1 .logo { font-size: 22px; }
+  .key-status { font-size: 12px; color: var(--muted); display:flex; align-items:center; gap:8px; }
+  .dot { width:9px; height:9px; border-radius:50%; background: var(--danger); display:inline-block; }
+  .dot.ok { background: var(--good); }
+  button {
+    font-family: inherit; cursor: pointer; border: none;
+    border-radius: 10px; padding: 9px 16px; font-size: 14px;
+    background: var(--panel-2); color: var(--text);
+    transition: background .15s, transform .05s;
+  }
+  button:hover { background: #31415c; }
+  button:active { transform: scale(.98); }
+  button.primary { background: var(--accent-2); color: #04121d; font-weight: 700; }
+  button.primary:hover { background: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 18px 60px; display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px;
+  }
+  .card h2 { margin: 0 0 6px; font-size: 17px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.9; }
+
+  textarea, input[type="text"], input[type="password"] {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; font-family: inherit; font-size: 15px;
+    resize: vertical;
+  }
+  textarea:focus, input:focus { outline: 2px solid var(--accent-2); border-color: transparent; }
+
+  .examples { display:flex; flex-wrap:wrap; gap:8px; margin: 12px 0 16px; }
+  .examples button { font-size: 12.5px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); }
+  .examples button:hover { color: var(--text); border-color: var(--accent-2); }
+
+  .progress { display:flex; align-items:center; gap:10px; margin-bottom: 14px; }
+  .progress .bar { flex:1; height: 8px; border-radius: 999px; background: var(--panel-2); overflow:hidden; }
+  .progress .bar > div { height:100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); border-radius: 999px; transition: width .3s; }
+  .progress span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  .question-text { font-size: 17px; font-weight: 700; line-height: 2; margin: 4px 0 16px; }
+  .options { display: flex; flex-direction: column; gap: 10px; }
+  .options button {
+    text-align: right; padding: 13px 16px; font-size: 15px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 12px; line-height: 1.8;
+  }
+  .options button:hover { border-color: var(--accent-2); background:#2b3a54; }
+  .options button.fallback { border-style: dashed; color: var(--muted); }
+
+  .freetext-box { margin-top: 12px; display: none; }
+  .freetext-box.show { display: block; }
+  .freetext-actions { margin-top: 10px; display: flex; gap: 10px; }
+
+  .spinner { display:inline-block; width:18px; height:18px; border:3px solid var(--border); border-top-color: var(--accent); border-radius:50%; animation: spin .8s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-row { display:flex; align-items:center; gap:10px; color: var(--muted); font-size:14px; padding: 8px 0; }
+
+  .sidebar .card { margin-bottom: 16px; }
+  .sidebar h3 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; }
+  .hypo { display:flex; flex-direction:column; gap:4px; margin-bottom: 12px; }
+  .hypo .name { font-size: 13.5px; line-height:1.7; }
+  .hypo .meter { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .hypo .meter > div { height: 100%; border-radius: 999px; }
+  .hypo .pct { font-size: 11.5px; color: var(--muted); }
+  .ruled { font-size: 12.5px; color: var(--muted); line-height:1.8; padding-right: 14px; margin:0; }
+  .tag { display:inline-block; font-size: 11.5px; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); color: var(--accent); margin-bottom: 8px;}
+
+  .report .rc { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: var(--panel-2); }
+  .report .rc .head { display:flex; justify-content: space-between; align-items:center; gap: 10px; flex-wrap: wrap; }
+  .report .rc .cause { font-weight: 700; font-size: 15px; line-height: 1.9; }
+  .band { font-size: 12px; padding: 3px 12px; border-radius: 999px; font-weight:700; white-space:nowrap; }
+  .band.High { background: rgba(52,211,153,.15); color: var(--good); }
+  .band.Medium { background: rgba(251,191,36,.15); color: var(--warn); }
+  .band.Low { background: rgba(248,113,113,.15); color: var(--danger); }
+  .report .evidence { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.9; }
+  .report h3 { font-size: 15px; margin: 20px 0 8px; color: var(--accent); }
+  .report ul, .report ol { margin: 0; padding-right: 20px; line-height: 2.1; font-size: 14px; }
+
+  .escalation { border: 1px solid var(--danger); background: rgba(248,113,113,.08); }
+  .escalation h2 { color: var(--danger); display:flex; gap: 8px; align-items:center;}
+  .escalation .row { margin-bottom: 12px; font-size: 14.5px; line-height: 2; }
+  .escalation .row b { color: var(--danger); }
+
+  .error-banner {
+    background: rgba(248,113,113,.12); border: 1px solid var(--danger);
+    color: #fecaca; padding: 12px 16px; border-radius: 10px;
+    font-size: 13.5px; margin-bottom: 14px; line-height: 1.9; display:none;
+  }
+  .error-banner.show { display:block; }
+
+  /* modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; width: min(480px, 92vw);
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 17px; }
+  .modal .hint a { color: var(--accent); }
+  .modal-actions { display:flex; gap:10px; margin-top: 16px; justify-content: flex-start; }
+  .provider-tabs { display:flex; flex-direction:column; gap:8px; margin: 10px 0 16px; }
+  .provider-tabs label { font-size: 14px; display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px 12px; border:1px solid var(--border); border-radius:10px; }
+  .provider-tabs label:has(input:checked) { border-color: var(--accent-2); background: rgba(14,165,233,.08); }
+  .provider-tabs input { accent-color: var(--accent-2); }
+  .fld { display:block; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+  .fld input { margin-top: 5px; font-size: 13.5px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo">🔧</span> دستیار عیب‌یابی هدایت‌شده <span style="font-size:12px;color:var(--muted);font-weight:400">IKCO Platforms</span></h1>
+  <div style="display:flex;align-items:center;gap:14px">
+    <span class="key-status"><span id="keyDot" class="dot"></span><span id="keyText">کلید API تنظیم نشده</span></span>
+    <button id="settingsBtn">⚙️ تنظیمات مدل</button>
+  </div>
+</header>
+
+<main>
+  <section id="mainCol">
+    <div id="errorBanner" class="error-banner"></div>
+
+    <!-- Start card -->
+    <div class="card" id="startCard">
+      <h2>شروع عیب‌یابی</h2>
+      <p class="hint">علامت یا مشکل خودرو را به زبان ساده بنویسید. دستیار با پرسیدن حداکثر ۸ سوال گزینه‌ای، شما را به علت ریشه‌ای می‌رساند. موارد ایمنی (ترمز، فرمان، نشت سوخت، دود...) بلافاصله ارجاع فوری می‌گیرند.</p>
+      <textarea id="symptomInput" rows="3" placeholder="مثلاً: موتور در استارت سرد صدای تق‌تق می‌دهد..."></textarea>
+      <div class="examples">
+        <button data-ex="موتور در استارت سرد صدای تق‌تق می‌دهد">صدای تق‌تق در استارت سرد</button>
+        <button data-ex="خودرو در سرعت بالا لرزش دارد">لرزش در سرعت بالا</button>
+        <button data-ex="چراغ چک روشن شده و خودرو بد کار می‌کند">چراغ چک روشن است</button>
+        <button data-ex="کولر باد گرم می‌زند و خنک نمی‌کند">کولر خنک نمی‌کند</button>
+      </div>
+      <button class="primary" id="startBtn">شروع عیب‌یابی</button>
+    </div>
+
+    <!-- Question card -->
+    <div class="card hidden" id="questionCard">
+      <div class="progress">
+        <span id="qCounter">سوال ۱ از ۸</span>
+        <div class="bar"><div id="progressFill" style="width:0%"></div></div>
+      </div>
+      <div class="tag" id="systemTag" style="display:none"></div>
+      <div class="question-text" id="questionText"></div>
+      <div class="options" id="optionsBox"></div>
+      <div class="freetext-box" id="freetextBox">
+        <textarea id="freetextInput" rows="2" placeholder="توضیح خود را بنویسید..."></textarea>
+        <div class="freetext-actions">
+          <button class="primary" id="freetextSubmit">ارسال توضیح</button>
+          <button id="freetextCancel">انصراف</button>
+        </div>
+      </div>
+      <div class="loading-row hidden" id="qLoading"><span class="spinner"></span><span>در حال تحلیل پاسخ و انتخاب بهترین سوال بعدی...</span></div>
+    </div>
+
+    <!-- Escalation card -->
+    <div class="card escalation hidden" id="escalationCard">
+      <h2>⛔ <span id="escTitle">ارجاع فوری</span></h2>
+      <div class="row"><b>دلیل: </b><span id="escReason"></span></div>
+      <div class="row"><b>اقدام لازم: </b><span id="escAction"></span></div>
+      <div class="row"><b>انجام ندهید: </b><span id="escDoNot"></span></div>
+      <button class="primary" id="escNewCase">شروع پرونده جدید</button>
+    </div>
+
+    <!-- Report card -->
+    <div class="card report hidden" id="reportCard">
+      <h2>📋 گزارش نهایی عیب‌یابی</h2>
+      <p class="hint" id="reportSymptom"></p>
+      <h3>علت(های) ریشه‌ای</h3>
+      <div id="rootCauses"></div>
+      <h3>تناقض‌های حل‌نشده</h3>
+      <ul id="conflictsList"></ul>
+      <h3>اقدام پیشنهادی</h3>
+      <ol id="actionsList"></ol>
+      <h3>ارجاع در صورت</h3>
+      <ul id="escalateIfList"></ul>
+      <div style="margin-top:18px">
+        <button class="primary" id="newCaseBtn">شروع پرونده جدید</button>
+      </div>
+    </div>
+
+    <div class="loading-row hidden card" id="mainLoading" style="margin-top:16px">
+      <span class="spinner"></span><span id="mainLoadingText">در حال پردازش...</span>
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    <div class="card">
+      <h3>💡 فرضیه‌های پیشرو</h3>
+      <div id="hypoBox"><p class="hint" style="margin:0">پس از شروع عیب‌یابی، فرضیه‌ها اینجا نمایش داده می‌شوند.</p></div>
+    </div>
+    <div class="card">
+      <h3>❌ رد شده</h3>
+      <ul class="ruled" id="ruledBox"><li>—</li></ul>
+    </div>
+    <div class="card">
+      <h3>ℹ️ روش کار</h3>
+      <p class="hint" style="margin:0">
+        عیب‌یابی مبتنی بر علائم + تحلیل پارتو + ۵ چرا + الگوی 8D.
+        سوالات توسط مدل DeepSeek (ابری یا لوکال/آفلاین) با هدف بیشترین تفکیک بین فرضیه‌ها انتخاب می‌شوند.
+        سقف سخت: ۸ سوال.
+      </p>
+    </div>
+  </aside>
+</main>
+
+<!-- Settings modal -->
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal">
+    <h2>تنظیمات مدل</h2>
+    <div class="provider-tabs">
+      <label><input type="radio" name="provider" value="cloud" checked /> ☁️ API ابری DeepSeek</label>
+      <label><input type="radio" name="provider" value="local" /> 💻 مدل لوکال (Ollama و مشابه)</label>
+      <label><input type="radio" name="provider" value="demo" /> 🎭 حالت دمو</label>
+    </div>
+
+    <div id="cloudFields">
+      <p class="hint">کلید API خود را از <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> دریافت کنید. کلید فقط در مرورگر شما (localStorage) ذخیره می‌شود.</p>
+      <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" />
+    </div>
+
+    <div id="localFields" style="display:none">
+      <p class="hint">آدرس سرور سازگار با OpenAI (مثل Ollama یا LM Studio) که مدل DeepSeek را آفلاین اجرا می‌کند. توجه: سرور لوکال باید از ماشینِ اجرای همین اپ در دسترس باشد.</p>
+      <label class="fld">آدرس سرور
+        <input type="text" id="baseUrlInput" placeholder="http://localhost:11434/v1" dir="ltr" />
+      </label>
+      <label class="fld">نام مدل (سوالات — Tier 1)
+        <input type="text" id="chatModelInput" placeholder="deepseek-r1:14b" dir="ltr" />
+      </label>
+      <label class="fld">نام مدل (گزارش نهایی — Tier 2)
+        <input type="text" id="reasonerModelInput" placeholder="deepseek-r1:14b (می‌تواند همان مدل باشد)" dir="ltr" />
+      </label>
+    </div>
+
+    <div id="demoFields" style="display:none">
+      <p class="hint">حالت نمایشی: بدون هیچ اتصالی به مدل، جریان کامل سوال‌ها و گزارش را با داده نمونه نشان می‌دهد.</p>
+    </div>
+
+    <div class="modal-actions">
+      <button class="primary" id="saveKeyBtn">ذخیره</button>
+      <button id="clearKeyBtn">حذف تنظیمات</button>
+      <button id="closeModalBtn">بستن</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
