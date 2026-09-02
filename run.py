@@ -47,6 +47,23 @@ def port_open(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def deps_ok():
+    """بررسی واقعی نصب بودن وابستگی‌ها (وجود خود پکیج express، نه فقط پوشه node_modules)"""
+    return os.path.isdir(os.path.join(APP_DIR, "node_modules", "express"))
+
+
+def install_deps(npm):
+    say("📦 در حال نصب وابستگی‌ها (کمی صبر کنید)...")
+    r = subprocess.run([npm, "install", "--no-audit", "--no-fund"], cwd=APP_DIR)
+    if r.returncode != 0 or not deps_ok():
+        fail("نصب وابستگی‌ها ناموفق بود. اتصال اینترنت را بررسی کنید و دوباره اجرا کنید.")
+    say("✅ وابستگی‌ها نصب شد.")
+
+
+def start_server(node):
+    return subprocess.Popen([node, os.path.join("src", "server.js")], cwd=APP_DIR)
+
+
 def main():
     say("=" * 55)
     say("  🔧 دستیار عیب‌یابی هدایت‌شده — اجراکننده خودکار")
@@ -75,22 +92,28 @@ def main():
         webbrowser.open(URL)
         return
 
-    # ۳) نصب وابستگی‌ها (فقط بار اول)
-    if not os.path.isdir(os.path.join(APP_DIR, "node_modules")):
-        say("📦 در حال نصب وابستگی‌ها (فقط بار اول، کمی صبر کنید)...")
-        r = subprocess.run([npm, "install", "--no-audit", "--no-fund"], cwd=APP_DIR)
-        if r.returncode != 0:
-            fail("نصب وابستگی‌ها ناموفق بود. اتصال اینترنت را بررسی کنید و دوباره اجرا کنید.")
-        say("✅ وابستگی‌ها نصب شد.")
+    # ۳) نصب وابستگی‌ها (اگر پکیج‌ها واقعاً موجود نباشند — حتی اگر پوشه node_modules خالی باشد)
+    if not deps_ok():
+        install_deps(npm)
 
     # ۴) اجرای سرور
     say("🚀 در حال بالا آوردن سرور...")
-    server = subprocess.Popen([node, os.path.join("src", "server.js")], cwd=APP_DIR)
+    server = start_server(node)
 
     # ۵) صبر تا آماده شدن و باز کردن مرورگر
     for _ in range(60):
         if server.poll() is not None:
-            fail("سرور بالا نیامد. متن خطای بالا را بررسی/ارسال کنید.")
+            # اگر سرور به‌خاطر پکیج ناقص بالا نیامد، یک بار نصب مجدد و تلاش دوباره
+            say("⚠️ سرور بالا نیامد — تلاش برای نصب مجدد وابستگی‌ها...")
+            install_deps(npm)
+            server = start_server(node)
+            for _ in range(60):
+                if server.poll() is not None:
+                    fail("سرور بالا نیامد. متن خطای بالا را بررسی/ارسال کنید.")
+                if port_open(PORT):
+                    break
+                time.sleep(0.5)
+            break
         if port_open(PORT):
             break
         time.sleep(0.5)
