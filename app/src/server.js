@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { TIER1_QUESTION_SELECTOR, TIER2_ANALYZER } from './prompts.js';
@@ -19,10 +20,148 @@ const MAX_QUESTIONS = 8;
 // ---- in-memory session store ----
 const sessions = new Map();
 
+// ---- BOM (Bill of Materials) ----
+// Priority 1: a real product BOM in Excel (BOM.xlsx at repo root or app/data, or BOM_XLSX env)
+// Priority 2: the generic vehicle-parts CSV (app/data/bom.csv, or BOM_PATH env)
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+
+const BOM_PATH = process.env.BOM_PATH || path.join(__dirname, '..', 'data', 'bom.csv');
+const BOM_XLSX_CANDIDATES = [
+  process.env.BOM_XLSX,
+  path.join(__dirname, '..', '..', 'BOM.xlsx'),
+  path.join(__dirname, '..', 'data', 'BOM.xlsx'),
+].filter(Boolean);
+
+let BOM = [];
+let BOM_SOURCE = 'none';
+let BOM_PRODUCT = '';
+
+function loadBomXlsx(file) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.readFile(file);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+  // product name from the header block
+  for (const row of rows.slice(0, 8)) {
+    const i = row.findIndex((c) => /product\s*name/i.test(String(c)));
+    if (i >= 0) {
+      BOM_PRODUCT = row.slice(i + 1).map(String).find((c) => c.trim()) || '';
+      break;
+    }
+  }
+
+  // locate the header row of the parts table
+  const headIdx = rows.findIndex(
+    (r) => r.some((c) => /part\s*name/i.test(String(c))) && r.some((c) => /designator/i.test(String(c)))
+  );
+  if (headIdx < 0) throw new Error('parts table header not found');
+  const head = rows[headIdx].map((c) => String(c).trim());
+  const col = (re) => head.findIndex((h) => re.test(h));
+  const cItem = col(/^item$/i), cDes = col(/designator/i), cName = col(/part\s*name/i);
+  const cPartNo = col(/part\s*no/i), cType = col(/type/i), cSize = col(/^size$/i);
+  const cQty = col(/qty/i), cStock = col(/stock\s*no/i), cNote = col(/^note$/i);
+
+  const parts = [];
+  for (const r of rows.slice(headIdx + 1)) {
+    const item = String(r[cItem] ?? '').trim();
+    const name = String(r[cName] ?? '').trim();
+    if (!/^\d+$/.test(item) || !name) continue;
+    const designators = String(r[cDes] ?? '').trim();
+    const refCount = designators ? designators.split(',').filter((s) => s.trim()).length : 0;
+    parts.push({
+      part_code: String(r[cStock] ?? '').trim() || String(r[cPartNo] ?? '').trim() || `ITEM-${item}`,
+      part_name_fa: name,
+      part_name_en: name,
+      system: 'electrical',
+      designator: designators.length > 40 ? designators.slice(0, 40) + `… (${refCount} refs)` : designators,
+      type: String(r[cType] ?? '').trim(),
+      size: String(r[cSize] ?? '').trim(),
+      qty: String(r[cQty] ?? '').trim(),
+      notes: String(r[cNote] ?? '').trim(),
+    });
+  }
+  return parts;
+}
+
+function loadBomCsv() {
+  const lines = fs.readFileSync(BOM_PATH, 'utf8').trim().split(/\r?\n/);
+  const head = lines[0].split(',').map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cols = line.split(',');
+    const row = {};
+    head.forEach((h, i) => (row[h] = (cols[i] || '').trim()));
+    return row;
+  }).filter((r) => r.part_code);
+}
+
+function loadBom() {
+  for (const file of BOM_XLSX_CANDIDATES) {
+    try {
+      if (fs.existsSync(file)) {
+        BOM = loadBomXlsx(file);
+        BOM_SOURCE = 'xlsx';
+        console.log(`BOM (Excel) loaded: ${BOM.length} parts from ${file}${BOM_PRODUCT ? ` — product: ${BOM_PRODUCT}` : ''}`);
+        return;
+      }
+    } catch (e) {
+      console.warn(`Failed to parse ${file}: ${e.message}`);
+    }
+  }
+  try {
+    BOM = loadBomCsv();
+    BOM_SOURCE = 'csv';
+    console.log(`BOM (CSV) loaded: ${BOM.length} parts from ${BOM_PATH}`);
+  } catch (e) {
+    BOM = [];
+    console.warn(`BOM not loaded (${e.message}) — continuing without part list.`);
+  }
+}
+loadBom();
+
+function bomForSystem(system) {
+  if (!BOM.length) return [];
+  // A product BOM (Excel) is the actual bill of the unit under diagnosis:
+  // always relevant, regardless of the classified vehicle system.
+  if (BOM_SOURCE === 'xlsx') return BOM;
+  if (!system) return [];
+  return BOM.filter((p) => p.system === system).slice(0, 30);
+}
+
+function bomPartsForModel(system) {
+  return bomForSystem(system).slice(0, 120).map((p) => ({
+    code: p.part_code,
+    name: p.part_name_en || p.part_name_fa,
+    ...(p.designator ? { refs: p.designator } : {}),
+    ...(p.size ? { pkg: p.size } : {}),
+    ...(p.qty ? { qty: p.qty } : {}),
+    ...(p.notes ? { notes: p.notes } : {}),
+  }));
+}
+
+// quick keyword classifier so the BOM filter works from the first question
+const SYSTEM_KEYWORDS = [
+  ['brakes', /ترمز|لنت|ABS|brake/i],
+  ['SRS/airbag', /ایربگ|کیسه\s*هوا|airbag|srs/i],
+  ['chassis/steering', /فرمان|جلوبندی|سیبک|طبق|کمک\s*فنر|steering|suspension/i],
+  ['transmission', /گیربکس|کلاچ|دنده|clutch|gearbox|transmission/i],
+  ['HVAC', /کولر|بخاری|تهویه|a\/?c|air\s*condition|hvac|heater/i],
+  ['fuel', /بنزین|سوخت|باک|پمپ\s*بنزین|fuel/i],
+  ['electrical', /باتری|دینام|استارت(?!\s*سرد)|برق|فیوز|battery|alternator|starter|electric/i],
+  ['engine', /موتور|روغن|جوش|شمع|انژکتور|engine|oil|overheat|misfire/i],
+];
+function quickClassify(symptom) {
+  for (const [system, re] of SYSTEM_KEYWORDS) {
+    if (re.test(symptom)) return system;
+  }
+  return '';
+}
+
 function newState(symptom, language) {
   return {
     symptom,
-    system: '',
+    system: quickClassify(symptom),
     language,
     question_count: 0,
     checks_done: [],
@@ -143,7 +282,11 @@ async function callJson(opts, retries = 1) {
 
 function caseStateForModel(state) {
   const { pending_question, phase, ...rest } = state;
-  return rest;
+  return {
+    ...rest,
+    ...(BOM_PRODUCT ? { bom_product: BOM_PRODUCT } : {}),
+    bom_parts: bomPartsForModel(state.system),
+  };
 }
 
 // ---- Tier 1: next question ----
@@ -341,7 +484,12 @@ function applyStateUpdates(state, parsed) {
 
 // ---- routes ----
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, hasEnvKey: Boolean(ENV_API_KEY), maxQuestions: MAX_QUESTIONS });
+  res.json({ ok: true, hasEnvKey: Boolean(ENV_API_KEY), maxQuestions: MAX_QUESTIONS, bomParts: BOM.length, bomSource: BOM_SOURCE, bomProduct: BOM_PRODUCT });
+});
+
+app.get('/api/bom', (req, res) => {
+  const system = (req.query.system || '').toString();
+  res.json({ total: BOM.length, source: BOM_SOURCE, product: BOM_PRODUCT, parts: system ? bomForSystem(system) : BOM });
 });
 
 app.post('/api/session/start', async (req, res) => {
@@ -438,6 +586,7 @@ function publicState(state) {
     question_count: state.question_count,
     leading_hypotheses: state.leading_hypotheses,
     ruled_out: state.ruled_out,
+    bom_parts: bomPartsForModel(state.system),
     phase: state.phase,
   };
 }

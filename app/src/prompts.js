@@ -43,6 +43,13 @@ Along with the question, you must also return the updated hypothesis state based
 - "leading_hypotheses": ranked list of {"hypothesis": "...", "confidence": 0-100}
 - "ruled_out": hypotheses eliminated so far, each as "hypothesis - one-line reason"
 Use Pareto reasoning: common causes for this symptom/system get higher baseline confidence.
+
+The case state may include "bom_parts": the actual bill-of-materials components available for the affected system, and optionally "bom_product": the name of the product/unit under diagnosis (e.g. a PCBA board).
+When bom_parts is present:
+- Anchor hypotheses on these specific components. Name the part and include its part code in parentheses, e.g. "خلاصی تایپیت هیدرولیکی (IK-ENG-012)".
+- Prefer questions that discriminate between specific BOM components.
+- Only propose a component outside the BOM list if no listed part can explain the evidence; state that it is outside the provided BOM.
+- If the BOM is an electronics/PCBA bill (resistors, capacitors, ICs, connectors...), reason at electronics level: consider component failure, wrong/out-of-tolerance value, solder joint defects, shorts/opens, ESD/overvoltage damage, and reference designators (e.g. C105, R23, U2) in questions and hypotheses.
 </state_update_rule>
 
 <fallback_option_rule>
@@ -129,6 +136,13 @@ Apply:
 
 Do not simply name the failed part.
 Explain the likely root cause mechanism based on the evidence.
+
+The case state may include "bom_parts": the actual bill-of-materials components for the affected system, and optionally "bom_product": the product/unit under diagnosis.
+When bom_parts is present:
+- Tie each root cause to specific listed components, naming the part with its part code in parentheses.
+- In Recommended Action, reference the same part codes for inspection/replacement steps.
+- If the most likely cause involves a component not in the BOM list, say so explicitly.
+- If the BOM is an electronics/PCBA bill, reason at electronics level (component failure, out-of-tolerance value, solder defects, shorts/opens, ESD/overvoltage) and cite reference designators where possible; recommend measurable checks (visual/AOI, continuity, voltage rails, oscilloscope points) rather than blind part swapping.
 </methodology>
 
 <contradiction_resolution>

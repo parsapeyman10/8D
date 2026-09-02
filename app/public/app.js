@@ -15,7 +15,7 @@ const els = {
   reportCard: $('reportCard'), reportSymptom: $('reportSymptom'), rootCauses: $('rootCauses'),
   conflictsList: $('conflictsList'), actionsList: $('actionsList'), escalateIfList: $('escalateIfList'), newCaseBtn: $('newCaseBtn'),
   mainLoading: $('mainLoading'), mainLoadingText: $('mainLoadingText'),
-  hypoBox: $('hypoBox'), ruledBox: $('ruledBox'),
+  hypoBox: $('hypoBox'), ruledBox: $('ruledBox'), bomBox: $('bomBox'),
 };
 
 let sessionId = null;
@@ -179,6 +179,16 @@ function renderSidebar(state) {
   }
   const ruled = state.ruled_out || [];
   els.ruledBox.innerHTML = ruled.length ? ruled.map(r => `<li>${esc(r)}</li>`).join('') : '<li>—</li>';
+
+  const bom = state.bom_parts || [];
+  if (bom.length) {
+    const shown = bom.slice(0, 12);
+    els.bomBox.innerHTML = shown.map(p =>
+      `<li>${esc(p.name || p.name_fa)} <span style="color:var(--accent);direction:ltr;display:inline-block">${esc(p.code)}</span>${p.qty ? ` <span style="opacity:.6">×${esc(p.qty)}</span>` : ''}${p.notes ? ` — <span style="opacity:.75">${esc(p.notes)}</span>` : ''}</li>`
+    ).join('') + (bom.length > shown.length ? `<li style="opacity:.6">و ${bom.length - shown.length} قطعه دیگر...</li>` : '');
+  } else {
+    els.bomBox.innerHTML = '<li>قطعه‌ای برای این سیستم در BOM ثبت نشده است.</li>';
+  }
 }
 
 function esc(s) {
@@ -323,6 +333,7 @@ function resetToStart() {
   els.symptomInput.value = '';
   els.hypoBox.innerHTML = '<p class="hint" style="margin:0">پس از شروع عیب‌یابی، فرضیه‌ها اینجا نمایش داده می‌شوند.</p>';
   els.ruledBox.innerHTML = '<li>—</li>';
+  els.bomBox.innerHTML = '<li>پس از تشخیص سیستم، قطعات BOM مرتبط اینجا نمایش داده می‌شوند.</li>';
 }
 
 els.startBtn.onclick = startSession;
