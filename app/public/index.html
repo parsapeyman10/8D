@@ -285,8 +285,34 @@
     </div>
 
     <div id="cloudFields">
-      <p class="hint">کلید API خود را از <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> دریافت کنید. کلید فقط در مرورگر شما (localStorage) ذخیره می‌شود.</p>
-      <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" />
+      <label class="fld">سرویس‌دهنده API
+        <select id="cloudPreset" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:inherit;font-size:14px;margin-top:5px">
+          <option value="deepseek">DeepSeek (رسمی)</option>
+          <option value="openrouter">OpenRouter — مدل‌های رایگان هم دارد</option>
+          <option value="groq">Groq — سریع و پلن رایگان</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI (ChatGPT)</option>
+          <option value="xai">xAI (Grok)</option>
+          <option value="mistral">Mistral</option>
+          <option value="together">Together AI</option>
+          <option value="avalai">AvalAI (درگاه ایرانی)</option>
+          <option value="gapgpt">GapGPT (درگاه ایرانی)</option>
+          <option value="custom">سفارشی (هر سرویس سازگار با OpenAI)</option>
+        </select>
+      </label>
+      <p class="hint" id="presetHint"></p>
+      <input type="password" id="apiKeyInput" placeholder="کلید API..." autocomplete="off" />
+      <label class="fld" style="margin-top:10px">آدرس سرور (Base URL)
+        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.deepseek.com" dir="ltr" />
+      </label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="fld">مدل سوالات (Tier 1)
+          <input type="text" id="cloudChatModelInput" placeholder="deepseek-chat" dir="ltr" />
+        </label>
+        <label class="fld">مدل گزارش (Tier 2)
+          <input type="text" id="cloudReasonerModelInput" placeholder="خالی = همان مدل" dir="ltr" />
+        </label>
+      </div>
     </div>
 
     <div id="bridgeFields" style="display:none">

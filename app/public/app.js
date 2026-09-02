@@ -33,8 +33,12 @@ function getConfig() {
       bridgeUrl: c.bridgeUrl || '',
       chatModel: c.chatModel || '',
       reasonerModel: c.reasonerModel || '',
+      cloudPreset: c.cloudPreset || 'deepseek',
+      cloudBaseUrl: c.cloudBaseUrl || '',
+      cloudChatModel: c.cloudChatModel || '',
+      cloudReasonerModel: c.cloudReasonerModel || '',
     };
-  } catch { return { provider: 'cloud', apiKey: '', baseUrl: '', bridgeUrl: '', chatModel: '', reasonerModel: '' }; }
+  } catch { return { provider: 'cloud', apiKey: '', baseUrl: '', bridgeUrl: '', chatModel: '', reasonerModel: '', cloudPreset: 'deepseek', cloudBaseUrl: '', cloudChatModel: '', cloudReasonerModel: '' }; }
 }
 function saveConfig(c) { localStorage.setItem('llm_config', JSON.stringify(c)); }
 function getKey() { return getConfig().apiKey; }
@@ -49,12 +53,13 @@ function configReady() {
 function refreshKeyStatus() {
   const c = getConfig();
   const ok = configReady();
+  const presetNames = { deepseek: 'DeepSeek', openrouter: 'OpenRouter', groq: 'Groq', gemini: 'Gemini', openai: 'OpenAI', xai: 'xAI', mistral: 'Mistral', together: 'Together', avalai: 'AvalAI', gapgpt: 'GapGPT', custom: 'سفارشی' };
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
     c.provider === 'demo' ? 'حالت دمو فعال است'
     : c.provider === 'bridge' ? 'مرورگر کروم (پل سلنیومی)'
     : c.provider === 'local' ? ('مدل لوکال: ' + (c.baseUrl || 'http://localhost:11434/v1'))
-    : ok ? (c.apiKey ? 'DeepSeek ابری (کلید مرورگر)' : 'DeepSeek ابری (کلید سرور)')
+    : ok ? ((presetNames[c.cloudPreset] || 'ابری') + (c.apiKey ? ' (کلید مرورگر)' : ' (کلید سرور)'))
     : 'کلید API تنظیم نشده';
 }
 
@@ -72,6 +77,37 @@ const baseUrlInput = document.getElementById('baseUrlInput');
 const bridgeUrlInput = document.getElementById('bridgeUrlInput');
 const chatModelInput = document.getElementById('chatModelInput');
 const reasonerModelInput = document.getElementById('reasonerModelInput');
+const cloudPreset = document.getElementById('cloudPreset');
+const presetHint = document.getElementById('presetHint');
+const cloudBaseUrlInput = document.getElementById('cloudBaseUrlInput');
+const cloudChatModelInput = document.getElementById('cloudChatModelInput');
+const cloudReasonerModelInput = document.getElementById('cloudReasonerModelInput');
+
+// ---------- cloud provider presets (any OpenAI-compatible API) ----------
+const PRESETS = {
+  deepseek:   { base: 'https://api.deepseek.com',                                chat: 'deepseek-chat', reasoner: 'deepseek-reasoner', keyUrl: 'https://platform.deepseek.com', hint: 'سرویس رسمی DeepSeek. ارزان و قوی.' },
+  openrouter: { base: 'https://openrouter.ai/api/v1',                            chat: 'deepseek/deepseek-chat-v3.1:free', reasoner: '', keyUrl: 'https://openrouter.ai/keys', hint: 'صدها مدل با یک کلید — مدل‌های :free بدون هزینه. برای DeepSeek رایگان همین مدل پیش‌فرض را نگه دارید.' },
+  groq:       { base: 'https://api.groq.com/openai/v1',                          chat: 'llama-3.3-70b-versatile', reasoner: '', keyUrl: 'https://console.groq.com/keys', hint: 'خیلی سریع، پلن رایگان سخاوتمندانه.' },
+  gemini:     { base: 'https://generativelanguage.googleapis.com/v1beta/openai', chat: 'gemini-2.0-flash', reasoner: '', keyUrl: 'https://aistudio.google.com/apikey', hint: 'کلید رایگان از Google AI Studio.' },
+  openai:     { base: 'https://api.openai.com/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://platform.openai.com/api-keys', hint: 'سرویس رسمی OpenAI.' },
+  xai:        { base: 'https://api.x.ai/v1',                                     chat: 'grok-3-mini', reasoner: '', keyUrl: 'https://console.x.ai', hint: 'Grok از xAI.' },
+  mistral:    { base: 'https://api.mistral.ai/v1',                               chat: 'mistral-large-latest', reasoner: '', keyUrl: 'https://console.mistral.ai/api-keys', hint: 'پلن رایگان دارد.' },
+  together:   { base: 'https://api.together.xyz/v1',                             chat: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', reasoner: '', keyUrl: 'https://api.together.ai/settings/api-keys', hint: 'مدل‌های متن‌باز متنوع.' },
+  avalai:     { base: 'https://api.avalai.ir/v1',                                chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://avalai.ir', hint: 'درگاه ایرانی — پرداخت ریالی، بدون نیاز به تحریم‌شکن. مدل‌های OpenAI/DeepSeek/… را پشتیبانی می‌کند.' },
+  gapgpt:     { base: 'https://api.gapgpt.app/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://gapgpt.app', hint: 'درگاه ایرانی — پرداخت ریالی.' },
+  custom:     { base: '', chat: '', reasoner: '', keyUrl: '', hint: 'هر سرویسی که endpoint سازگار با OpenAI بدهد (/chat/completions) — آدرس و نام مدل را خودتان وارد کنید.' },
+};
+
+function applyPreset(id, keepValues = false) {
+  const p = PRESETS[id] || PRESETS.custom;
+  presetHint.innerHTML = `${p.hint}${p.keyUrl ? ` دریافت کلید: <a href="${p.keyUrl}" target="_blank" rel="noopener" dir="ltr">${p.keyUrl.replace('https://', '')}</a>` : ''} <br>کلید فقط در مرورگر شما ذخیره می‌شود.`;
+  if (!keepValues) {
+    cloudBaseUrlInput.value = p.base;
+    cloudChatModelInput.value = p.chat;
+    cloudReasonerModelInput.value = p.reasoner;
+  }
+}
+cloudPreset.addEventListener('change', () => applyPreset(cloudPreset.value));
 
 function syncProviderFields() {
   const p = providerRadios().find(r => r.checked)?.value || 'cloud';
@@ -90,6 +126,11 @@ els.settingsBtn.onclick = () => {
   if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || '';
   chatModelInput.value = c.chatModel;
   reasonerModelInput.value = c.reasonerModel;
+  cloudPreset.value = c.cloudPreset || 'deepseek';
+  applyPreset(cloudPreset.value, true);
+  cloudBaseUrlInput.value = c.cloudBaseUrl || PRESETS[cloudPreset.value]?.base || '';
+  cloudChatModelInput.value = c.cloudChatModel || PRESETS[cloudPreset.value]?.chat || '';
+  cloudReasonerModelInput.value = c.cloudReasonerModel || PRESETS[cloudPreset.value]?.reasoner || '';
   syncProviderFields();
   els.settingsModal.classList.add('show');
 };
@@ -104,6 +145,10 @@ els.saveKeyBtn.onclick = () => {
     bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : '',
     chatModel: chatModelInput.value.trim(),
     reasonerModel: reasonerModelInput.value.trim(),
+    cloudPreset: cloudPreset.value,
+    cloudBaseUrl: cloudBaseUrlInput.value.trim(),
+    cloudChatModel: cloudChatModelInput.value.trim(),
+    cloudReasonerModel: cloudReasonerModelInput.value.trim(),
   });
   els.settingsModal.classList.remove('show');
   refreshKeyStatus();
@@ -138,14 +183,22 @@ async function api(path, body) {
   if (c.provider === 'bridge') {
     headers['x-provider'] = 'local';
     headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
+    if (c.chatModel) headers['x-chat-model'] = c.chatModel;
+    if (c.reasonerModel) headers['x-reasoner-model'] = c.reasonerModel;
+  } else if (c.provider === 'local') {
+    headers['x-provider'] = 'local';
+    if (c.baseUrl) headers['x-base-url'] = c.baseUrl;
+    if (c.chatModel) headers['x-chat-model'] = c.chatModel;
+    if (c.reasonerModel) headers['x-reasoner-model'] = c.reasonerModel;
   } else {
-    headers['x-provider'] = c.provider === 'demo' ? 'cloud' : c.provider;
+    headers['x-provider'] = 'cloud';
     if (c.provider === 'demo') headers['x-deepseek-key'] = 'demo';
     else if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
-    if (c.baseUrl) headers['x-base-url'] = c.baseUrl;
+    if (c.cloudBaseUrl) headers['x-base-url'] = c.cloudBaseUrl;
+    if (c.cloudChatModel) headers['x-chat-model'] = c.cloudChatModel;
+    const reasoner = c.cloudReasonerModel || c.cloudChatModel; // default: same model
+    if (reasoner) headers['x-reasoner-model'] = reasoner;
   }
-  if (c.chatModel) headers['x-chat-model'] = c.chatModel;
-  if (c.reasonerModel) headers['x-reasoner-model'] = c.reasonerModel;
   const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
   let data = null;
   try { data = await res.json(); } catch {}

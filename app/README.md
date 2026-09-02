@@ -10,12 +10,29 @@ npm install
 npm start          # http://localhost:3000
 ```
 
-## منبع مدل (ابری یا آفلاین/لوکال)
+## منبع مدل — هر سرویس‌دهنده‌ای، محدود نیستید
 
-از دکمه «⚙️ تنظیمات مدل» در UI یکی از سه حالت را انتخاب کنید:
+از دکمه «⚙️ تنظیمات مدل» در UI انتخاب کنید:
 
-1. **☁️ API ابری DeepSeek** — کلید `sk-...` از platform.deepseek.com. کلید در localStorage مرورگر ذخیره و با هدر `x-deepseek-key` ارسال می‌شود.
-2. **💻 مدل لوکال/آفلاین** — هر سرور سازگار با OpenAI که مدل DeepSeek را اجرا می‌کند (Ollama، LM Studio، vLLM):
+### ☁️ API ابری — ۱۱ سرویس‌دهنده آماده + سفارشی
+
+| سرویس | Base URL | مدل پیش‌فرض | نکته |
+|---|---|---|---|
+| DeepSeek رسمی | api.deepseek.com | deepseek-chat / deepseek-reasoner | |
+| OpenRouter | openrouter.ai/api/v1 | deepseek/deepseek-chat-v3.1:free | **مدل‌های رایگان** |
+| Groq | api.groq.com/openai/v1 | llama-3.3-70b-versatile | سریع، پلن رایگان |
+| Google Gemini | generativelanguage.googleapis.com/v1beta/openai | gemini-2.0-flash | کلید رایگان از AI Studio |
+| OpenAI | api.openai.com/v1 | gpt-4o-mini | |
+| xAI (Grok) | api.x.ai/v1 | grok-3-mini | |
+| Mistral | api.mistral.ai/v1 | mistral-large-latest | پلن رایگان |
+| Together | api.together.xyz/v1 | Llama-3.3-70B-Turbo | |
+| **AvalAI (ایرانی)** | api.avalai.ir/v1 | gpt-4o-mini | پرداخت ریالی، بدون تحریم‌شکن |
+| **GapGPT (ایرانی)** | api.gapgpt.app/v1 | gpt-4o-mini | پرداخت ریالی |
+| سفارشی | هر آدرس | هر مدل | هر سرویس سازگار با OpenAI |
+
+انتخاب سرویس، آدرس و مدل را خودکار پر می‌کند؛ همه قابل ویرایش‌اند. اگر «مدل گزارش (Tier 2)» را خالی بگذارید، همان مدل Tier 1 استفاده می‌شود. کلید فقط در localStorage مرورگر ذخیره می‌شود.
+
+### 💻 مدل لوکال/آفلاین — هر سرور سازگار با OpenAI (Ollama، LM Studio، vLLM)
 
    ```bash
    # نمونه با Ollama:
@@ -25,7 +42,8 @@ npm start          # http://localhost:3000
 
    سپس در تنظیمات: آدرس `http://localhost:11434/v1` و نام مدل `deepseek-r1:14b`. کلید لازم نیست. خروجی `<think>...</think>` مدل‌های R1 به‌طور خودکار حذف می‌شود.
    ⚠️ سرور لوکال باید از ماشینی که این اپ روی آن اجرا می‌شود در دسترس باشد (در پیش‌نمایش sandbox، «لوکالِ» شما در دسترس نیست — روی سیستم خودتان اجرا کنید).
-3. **🎭 حالت دمو** — بدون هیچ اتصالی، جریان کامل را با داده نمونه نشان می‌دهد.
+
+### 🎭 حالت دمو — بدون هیچ اتصالی (در حالت ابری کلمه `demo` را به‌جای کلید وارد کنید)
 
 ### 🌉 راه چهارم: پل وب سلنیومی (بدون کلید API)
 

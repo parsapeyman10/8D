@@ -448,12 +448,19 @@ function getLlmConfig(req) {
   // basic validation
   if (!/^https?:\/\//i.test(baseUrl)) baseUrl = DEEPSEEK_BASE_URL;
 
+  // For non-DeepSeek providers, "deepseek-reasoner" would be an invalid model:
+  // default the reasoner to the chat model when a custom base URL is used.
+  let effReasoner = reasonerModel;
+  if (!req.headers['x-reasoner-model'] && headerBase && !/deepseek\.com/i.test(baseUrl)) {
+    effReasoner = (req.headers['x-chat-model'] || '').toString().trim() || chatModel;
+  }
+
   return {
     provider,
     apiKey,
     baseUrl,
     chatModel: provider === 'local' && !req.headers['x-chat-model'] ? (process.env.LOCAL_MODEL || chatModel) : chatModel,
-    reasonerModel: provider === 'local' && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || reasonerModel) : reasonerModel,
+    reasonerModel: provider === 'local' && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || effReasoner) : effReasoner,
     demo: isDemoKey(apiKey),
     // local servers don't need a key; cloud does (unless demo)
     needsKey: provider !== 'local',
