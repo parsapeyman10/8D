@@ -1,0 +1,62 @@
+part_code,part_name_fa,part_name_en,system,notes
+IK-ENG-001,شمع موتور,Spark plug,engine,مصرفی - سرویس دوره‌ای
+IK-ENG-002,وایر شمع,Ignition wire,engine,
+IK-ENG-003,کویل دوبل,Ignition coil,engine,
+IK-ENG-004,انژکتور سوخت,Fuel injector,engine,
+IK-ENG-005,سنسور میل‌سوپاپ,Camshaft sensor,engine,
+IK-ENG-006,سنسور میل‌لنگ,Crankshaft sensor,engine,عامل رایج خاموشی ناگهانی
+IK-ENG-007,تسمه تایم,Timing belt,engine,ایمنی موتور - تعویض دوره‌ای
+IK-ENG-008,واتر پمپ,Water pump,engine,
+IK-ENG-009,ترموستات,Thermostat,engine,
+IK-ENG-010,رادیاتور آب,Radiator,engine,
+IK-ENG-011,اویل پمپ,Oil pump,engine,
+IK-ENG-012,تایپیت هیدرولیکی,Hydraulic tappet,engine,عامل رایج صدای تق‌تق سرد
+IK-ENG-013,دسته موتور,Engine mount,engine,عامل رایج لرزش
+IK-ENG-014,سنسور اکسیژن,Oxygen sensor,engine,
+IK-ENG-015,دریچه گاز برقی,Electronic throttle body,engine,
+IK-ENG-016,استپر موتور,Idle stepper motor,engine,عامل رایج بد کار کردن درجا
+IK-ENG-017,فیلتر هوا,Air filter,engine,مصرفی
+IK-ENG-018,سنسور دمای آب,Coolant temp sensor,engine,
+IK-ENG-019,سنسور فشار هوا منیفولد,MAP sensor,engine,
+IK-ENG-020,واشر سرسیلندر,Head gasket,engine,
+IK-FUE-001,پمپ بنزین,Fuel pump,fuel,عامل رایج ضعف کشش
+IK-FUE-002,فیلتر بنزین,Fuel filter,fuel,مصرفی
+IK-FUE-003,ریل سوخت,Fuel rail,fuel,
+IK-FUE-004,رگلاتور فشار سوخت,Fuel pressure regulator,fuel,
+IK-FUE-005,شناور باک,Fuel level sender,fuel,
+IK-ELE-001,باتری,Battery,electrical,
+IK-ELE-002,دینام,Alternator,electrical,
+IK-ELE-003,استارتر,Starter motor,electrical,
+IK-ELE-004,ECU موتور,Engine ECU,electrical,
+IK-ELE-005,رله دوبل,Double relay,electrical,عیب شایع در پلتفرم‌های پژویی
+IK-ELE-006,دسته سیم موتور,Engine wiring harness,electrical,
+IK-ELE-007,سوئیچ و ایموبلایزر,Ignition switch & immobilizer,electrical,
+IK-ELE-008,فیوز و جعبه فیوز,Fuse box,electrical,
+IK-BRK-001,لنت ترمز جلو,Front brake pads,brakes,مصرفی
+IK-BRK-002,دیسک ترمز جلو,Front brake disc,brakes,
+IK-BRK-003,بوستر ترمز,Brake booster,brakes,
+IK-BRK-004,پمپ اصلی ترمز,Brake master cylinder,brakes,
+IK-BRK-005,سنسور ABS چرخ,ABS wheel sensor,brakes,
+IK-BRK-006,کالیپر ترمز,Brake caliper,brakes,
+IK-BRK-007,کاسه/کفشک ترمز عقب,Rear drum & shoes,brakes,
+IK-CHS-001,کمک فنر جلو,Front shock absorber,chassis/steering,
+IK-CHS-002,سیبک فرمان,Tie rod end,chassis/steering,عامل رایج لقی فرمان
+IK-CHS-003,بوش طبق,Control arm bushing,chassis/steering,عامل رایج صدای تلق‌تلق
+IK-CHS-004,میل موجگیر و لاستیک‌ها,Stabilizer bar & bushes,chassis/steering,
+IK-CHS-005,جعبه فرمان هیدرولیک,Hydraulic steering rack,chassis/steering,
+IK-CHS-006,پمپ هیدرولیک فرمان,Power steering pump,chassis/steering,
+IK-CHS-007,توپی و بلبرینگ چرخ,Wheel hub & bearing,chassis/steering,عامل رایج صدای هوم در سرعت
+IK-TRN-001,دیسک و صفحه کلاچ,Clutch disc & pressure plate,transmission,
+IK-TRN-002,بلبرینگ کلاچ,Clutch release bearing,transmission,عامل رایج صدای ویز با کلاچ
+IK-TRN-003,دوشاخه کلاچ,Clutch fork,transmission,
+IK-TRN-004,روغن گیربکس,Gearbox oil,transmission,مصرفی
+IK-TRN-005,سنسور سرعت گیربکس,Speed sensor,transmission,
+IK-HVA-001,کمپرسور کولر,A/C compressor,HVAC,
+IK-HVA-002,کندانسور کولر,A/C condenser,HVAC,
+IK-HVA-003,اواپراتور,Evaporator,HVAC,
+IK-HVA-004,موتور بلوئر (فن داخل),Blower motor,HVAC,
+IK-HVA-005,فیلتر کابین,Cabin filter,HVAC,مصرفی
+IK-HVA-006,پرشر سوئیچ کولر,A/C pressure switch,HVAC,
+IK-SRS-001,کیسه هوا راننده,Driver airbag,SRS/airbag,فقط متخصص مجاز
+IK-SRS-002,یونیت ایربگ,Airbag control unit,SRS/airbag,فقط متخصص مجاز
+IK-SRS-003,فنر ساعتی,Clock spring,SRS/airbag,عیب شایع چراغ ایربگ

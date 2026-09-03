@@ -1,0 +1,930 @@
+// Guided Diagnostic Assistant — Advanced Frontend with 8D Quality Engine, DeepSeek Chrome & Learning Database
+const $ = (id) => document.getElementById(id);
+
+const els = {
+  keyDot: $('keyDot'), keyText: $('keyText'),
+  settingsBtn: $('settingsBtn'), settingsModal: $('settingsModal'),
+  testBridgeBtn: $('testBridgeBtn'), bridgeNotice: $('bridgeNotice'),
+  claudeApiKeyInput: $('claudeApiKeyInput'), claudeModelSelect: $('claudeModelSelect'), testClaudeBtn: $('testClaudeBtn'),
+  geminiApiKeyInput: $('geminiApiKeyInput'), geminiModelSelect: $('geminiModelSelect'),
+  apiKeyInput: $('apiKeyInput'), saveKeyBtn: $('saveKeyBtn'), clearKeyBtn: $('clearKeyBtn'), closeModalBtn: $('closeModalBtn'),
+  errorBanner: $('errorBanner'),
+  startCard: $('startCard'), symptomInput: $('symptomInput'), dtcInput: $('dtcInput'), dtcList: $('dtcList'),
+  startBtn: $('startBtn'), useBomCheckbox: $('useBomCheckbox'), micBtn: $('micBtn'),
+  questionCard: $('questionCard'), qCounter: $('qCounter'), progressFill: $('progressFill'),
+  systemTag: $('systemTag'), questionText: $('questionText'), optionsBox: $('optionsBox'),
+  freetextBox: $('freetextBox'), freetextInput: $('freetextInput'), freetextSubmit: $('freetextSubmit'), freetextCancel: $('freetextCancel'),
+  concludeEarlyBtn: $('concludeEarlyBtn'), extendQuestionsBtn: $('extendQuestionsBtn'),
+  qLoading: $('qLoading'),
+  escalationCard: $('escalationCard'), escTitle: $('escTitle'), escReason: $('escReason'), escAction: $('escAction'), escDoNot: $('escDoNot'), escNewCase: $('escNewCase'),
+  reportCard: $('reportCard'), reportSymptom: $('reportSymptom'), rootCauses: $('rootCauses'),
+  whysTree: $('whysTree'), eightDGrid: $('eightDGrid'), printReportBtn: $('printReportBtn'), copyReportBtn: $('copyReportBtn'),
+  conflictsList: $('conflictsList'), actionsList: $('actionsList'), escalateIfList: $('escalateIfList'),
+  confirmResultCheckbox: $('confirmResultCheckbox'), feedbackNotesInput: $('feedbackNotesInput'),
+  saveFeedbackBtn: $('saveFeedbackBtn'), feedbackSavedMsg: $('feedbackSavedMsg'),
+  newCaseBtn: $('newCaseBtn'), reportExtendBtn: $('reportExtendBtn'),
+  mainLoading: $('mainLoading'), mainLoadingText: $('mainLoadingText'),
+  hypoBox: $('hypoBox'), learnedMemoryBox: $('learnedMemoryBox'), ruledBox: $('ruledBox'), bomBox: $('bomBox'),
+  // Tabs
+  tabDiagnosisBtn: $('tabDiagnosisBtn'), tabPartBtn: $('tabPartBtn'), tabPinoutsBtn: $('tabPinoutsBtn'), tabKnowledgeBtn: $('tabKnowledgeBtn'),
+  tabDiagnosis: $('tabDiagnosis'), tabPart: $('tabPart'), tabPinouts: $('tabPinouts'), tabKnowledge: $('tabKnowledge'),
+  // Pinouts
+  pinoutsContainer: $('pinoutsContainer'),
+  // BOM upload
+  uploadBomBtn: $('uploadBomBtn'), bomFileInput: $('bomFileInput'),
+  // Knowledge
+  statTotalCases: $('statTotalCases'), statConfirmedCases: $('statConfirmedCases'), statUserKnowledge: $('statUserKnowledge'),
+  kTitleInput: $('kTitleInput'), kSymptomInput: $('kSymptomInput'), kPartCodeInput: $('kPartCodeInput'),
+  kRootCauseInput: $('kRootCauseInput'), kSolutionInput: $('kSolutionInput'), addKnowledgeBtn: $('addKnowledgeBtn'),
+  userKnowledgeList: $('userKnowledgeList'), recentCasesList: $('recentCasesList'),
+  exportDbBtn: $('exportDbBtn'), importDbBtn: $('importDbBtn'), importDbInput: $('importDbInput'),
+};
+
+let sessionId = null;
+let serverHasKey = false;
+let pendingFallbackOption = null;
+let lastReportData = null;
+
+// ---------- TAB SWITCHING ----------
+function switchTab(tabId) {
+  [els.tabDiagnosis, els.tabPart, els.tabPinouts, els.tabKnowledge].forEach(t => t && t.classList.remove('active'));
+  [els.tabDiagnosisBtn, els.tabPartBtn, els.tabPinoutsBtn, els.tabKnowledgeBtn].forEach(b => b && b.classList.remove('active'));
+
+  if (tabId === 'diagnosis') {
+    els.tabDiagnosis.classList.add('active');
+    els.tabDiagnosisBtn.classList.add('active');
+  } else if (tabId === 'part') {
+    els.tabPart.classList.add('active');
+    els.tabPartBtn.classList.add('active');
+  } else if (tabId === 'pinouts') {
+    els.tabPinouts.classList.add('active');
+    els.tabPinoutsBtn.classList.add('active');
+    loadPinoutsData();
+  } else if (tabId === 'knowledge') {
+    els.tabKnowledge.classList.add('active');
+    els.tabKnowledgeBtn.classList.add('active');
+    loadKnowledgeData();
+  }
+}
+
+els.tabDiagnosisBtn.onclick = () => switchTab('diagnosis');
+els.tabPartBtn.onclick = () => switchTab('part');
+els.tabPinoutsBtn.onclick = () => switchTab('pinouts');
+els.tabKnowledgeBtn.onclick = () => switchTab('knowledge');
+
+// ---------- SPEECH RECOGNITION (Voice Input) ----------
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRec();
+  recognition.lang = 'fa-IR';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    els.micBtn.classList.add('listening');
+    els.micBtn.textContent = '🔴 در حال شنیدن...';
+  };
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    els.symptomInput.value = (els.symptomInput.value ? els.symptomInput.value + ' ' : '') + text;
+  };
+  recognition.onend = () => {
+    els.micBtn.classList.remove('listening');
+    els.micBtn.textContent = '🎤 ورودی صوتی';
+  };
+  recognition.onerror = () => {
+    els.micBtn.classList.remove('listening');
+    els.micBtn.textContent = '🎤 ورودی صوتی';
+  };
+  els.micBtn.onclick = () => {
+    try { recognition.start(); } catch { recognition.stop(); }
+  };
+} else {
+  els.micBtn.style.display = 'none';
+}
+
+// Load DTC list for quick suggestion
+fetch('/api/dtc/list').then(r => r.json()).then(codes => {
+  els.dtcList.innerHTML = codes.map(c => `<option value="${c.code}">${c.code} — ${c.desc_fa}</option>`).join('');
+}).catch(() => {});
+
+// ---------- BOM UPLOAD ----------
+els.uploadBomBtn.onclick = () => els.bomFileInput.click();
+els.bomFileInput.onchange = async () => {
+  const file = els.bomFileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const base64 = e.target.result.split(',')[1];
+    setLoading(true, 'در حال پردازش و بارگذاری فایل BOM...');
+    try {
+      const res = await api('/api/bom/upload', { base64, filename: file.name });
+      alert(`✅ فایل BOM با موفقیت بارگذاری شد!\nتعداد قطعات: ${res.count}\nنام محصول: ${res.product || file.name}`);
+      location.reload();
+    } catch (err) {
+      showError('خطا در بارگذاری فایل BOM: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  reader.readAsDataURL(file);
+};
+
+// ---------- MODEL CONFIG HANDLING ----------
+function getConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem('llm_config') || '{}');
+    return {
+      provider: c.provider || 'bridge', // Default is DeepSeek Chrome Bridge
+      bridgeUrl: c.bridgeUrl || 'http://localhost:8765/v1',
+      claudeApiKey: c.claudeApiKey || localStorage.getItem('claude_api_key') || '',
+      claudeModel: c.claudeModel || 'claude-3-5-sonnet-20241022',
+      geminiApiKey: c.geminiApiKey || localStorage.getItem('gemini_api_key') || '',
+      geminiModel: c.geminiModel || 'gemini-1.5-flash',
+      apiKey: c.apiKey || '',
+      baseUrl: c.baseUrl || '',
+      chatModel: c.chatModel || '',
+      cloudBaseUrl: c.cloudBaseUrl || '',
+      cloudChatModel: c.cloudChatModel || '',
+    };
+  } catch {
+    return {
+      provider: 'bridge',
+      bridgeUrl: 'http://localhost:8765/v1',
+      claudeApiKey: '',
+      claudeModel: 'claude-3-5-sonnet-20241022',
+      geminiApiKey: '',
+      geminiModel: 'gemini-1.5-flash',
+      apiKey: '',
+      baseUrl: '',
+      chatModel: '',
+      cloudBaseUrl: '',
+      cloudChatModel: '',
+    };
+  }
+}
+function saveConfig(c) {
+  localStorage.setItem('llm_config', JSON.stringify(c));
+  if (c.geminiApiKey) localStorage.setItem('gemini_api_key', c.geminiApiKey);
+  if (c.claudeApiKey) localStorage.setItem('claude_api_key', c.claudeApiKey);
+}
+
+function configReady() {
+  const c = getConfig();
+  if (c.provider === 'bridge' || c.provider === 'offline' || c.provider === 'local') return true;
+  if (c.provider === 'gemini') return true;
+  if (c.provider === 'claude') return Boolean(c.claudeApiKey) || serverHasKey;
+  return Boolean(c.apiKey) || serverHasKey;
+}
+
+function refreshKeyStatus() {
+  const c = getConfig();
+  const ok = configReady();
+  els.keyDot.classList.toggle('ok', ok);
+  els.keyText.textContent =
+    c.provider === 'bridge' ? 'کروم DeepSeek 🌐'
+    : c.provider === 'claude' ? 'Claude 3.5 🧠'
+    : c.provider === 'gemini' ? 'Gemini ⚡'
+    : c.provider === 'offline' ? 'موتور آفلاین 🔌'
+    : c.provider === 'local' ? 'مدل محلی 🦙'
+    : ok ? 'سرویس ابری ☁️'
+    : 'تنظیم نشده';
+
+  if (els.bridgeNotice) {
+    els.bridgeNotice.style.display = c.provider === 'bridge' ? 'flex' : 'none';
+  }
+}
+
+async function checkLoginStatus() {
+  try {
+    const res = await fetch('/api/bridge/status');
+    const data = await res.json();
+    const ls = data.login_status || {};
+    const bridgeNotice = document.getElementById('bridgeNotice');
+    if (bridgeNotice && data.ok) {
+      if (ls.logged_in) {
+        bridgeNotice.innerHTML = `<span>🟢 <b>لاگین DeepSeek تایید شد:</b> حساب کاربری <b>${esc(ls.email)}</b> احراز هویت شده و آماده است.</span>
+          <button id="testBridgeBtn" onclick="testBridgeCall()" style="font-size:12px;padding:5px 10px;background:var(--accent-2);color:#04121d;font-weight:700">⚡ تست ارسال پیام</button>`;
+      } else {
+        bridgeNotice.innerHTML = `<span>🟡 <b>در انتظار تایید لاگین:</b> فرم ورود با ایمیل <b>${esc(ls.email)}</b> ارسال شده است. اگر پازل/کپچای امنیتی در پنجره کروم باز است، آن را کامل کنید.</span>
+          <button onclick="checkLoginStatus()" style="font-size:12px;padding:5px 10px;background:var(--warn);color:#04121d;font-weight:700">🔄 بررسی مجدد لاگین</button>`;
+      }
+    }
+  } catch (e) {
+    // Bridge might be offline
+  }
+}
+setInterval(checkLoginStatus, 5000);
+checkLoginStatus();
+
+const providerRadios = () => [...document.querySelectorAll('input[name="provider"]')];
+const claudeFields = document.getElementById('claudeFields');
+const bridgeFields = document.getElementById('bridgeFields');
+const geminiFields = document.getElementById('geminiFields');
+const offlineFields = document.getElementById('offlineFields');
+const cloudFields = document.getElementById('cloudFields');
+const localFields = document.getElementById('localFields');
+const bridgeUrlInput = document.getElementById('bridgeUrlInput');
+const baseUrlInput = document.getElementById('baseUrlInput');
+const chatModelInput = document.getElementById('chatModelInput');
+const cloudBaseUrlInput = document.getElementById('cloudBaseUrlInput');
+const cloudChatModelInput = document.getElementById('cloudChatModelInput');
+
+function syncProviderFields() {
+  const p = providerRadios().find(r => r.checked)?.value || 'bridge';
+  if (bridgeFields) bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
+  if (claudeFields) claudeFields.style.display = p === 'claude' ? 'block' : 'none';
+  if (geminiFields) geminiFields.style.display = p === 'gemini' ? 'block' : 'none';
+  if (offlineFields) offlineFields.style.display = p === 'offline' ? 'block' : 'none';
+  if (cloudFields) cloudFields.style.display = p === 'cloud' ? 'block' : 'none';
+  if (localFields) localFields.style.display = p === 'local' ? 'block' : 'none';
+}
+providerRadios().forEach(r => r.addEventListener('change', syncProviderFields));
+
+els.settingsBtn.onclick = () => {
+  const c = getConfig();
+  providerRadios().forEach(r => r.checked = (r.value === c.provider));
+  if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || 'http://localhost:8765/v1';
+  if (els.claudeApiKeyInput) els.claudeApiKeyInput.value = c.claudeApiKey || '';
+  if (els.claudeModelSelect) els.claudeModelSelect.value = c.claudeModel || 'claude-3-5-sonnet-20241022';
+  if (els.geminiApiKeyInput) els.geminiApiKeyInput.value = c.geminiApiKey || '';
+  if (els.geminiModelSelect) els.geminiModelSelect.value = c.geminiModel || 'gemini-1.5-flash';
+  if (els.apiKeyInput) els.apiKeyInput.value = c.apiKey || '';
+  if (baseUrlInput) baseUrlInput.value = c.baseUrl || 'http://localhost:11434/v1';
+  if (chatModelInput) chatModelInput.value = c.chatModel || 'deepseek-r1:8b';
+  if (cloudBaseUrlInput) cloudBaseUrlInput.value = c.cloudBaseUrl || 'https://api.deepseek.com';
+  if (cloudChatModelInput) cloudChatModelInput.value = c.cloudChatModel || 'deepseek-chat';
+  syncProviderFields();
+  els.settingsModal.classList.add('show');
+};
+els.closeModalBtn.onclick = () => els.settingsModal.classList.remove('show');
+
+els.saveKeyBtn.onclick = () => {
+  const provider = providerRadios().find(r => r.checked)?.value || 'bridge';
+  saveConfig({
+    provider,
+    bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : 'http://localhost:8765/v1',
+    claudeApiKey: els.claudeApiKeyInput ? els.claudeApiKeyInput.value.trim() : '',
+    claudeModel: els.claudeModelSelect ? els.claudeModelSelect.value : 'claude-3-5-sonnet-20241022',
+    geminiApiKey: els.geminiApiKeyInput ? els.geminiApiKeyInput.value.trim() : '',
+    geminiModel: els.geminiModelSelect ? els.geminiModelSelect.value : 'gemini-1.5-flash',
+    apiKey: els.apiKeyInput ? els.apiKeyInput.value.trim() : '',
+    baseUrl: baseUrlInput ? baseUrlInput.value.trim() : '',
+    chatModel: chatModelInput ? chatModelInput.value.trim() : '',
+    cloudBaseUrl: cloudBaseUrlInput ? cloudBaseUrlInput.value.trim() : '',
+    cloudChatModel: cloudChatModelInput ? cloudChatModelInput.value.trim() : '',
+  });
+  els.settingsModal.classList.remove('show');
+  refreshKeyStatus();
+};
+
+if (els.testClaudeBtn) {
+  els.testClaudeBtn.onclick = async () => {
+    const key = els.claudeApiKeyInput ? els.claudeApiKeyInput.value.trim() : '';
+    const model = els.claudeModelSelect ? els.claudeModelSelect.value : 'claude-3-5-sonnet-20241022';
+    if (!key) { alert('لطفاً ابتدا کلید Claude API را وارد کنید.'); return; }
+    els.testClaudeBtn.textContent = '⏳ در حال تست...';
+    try {
+      const res = await fetch('/api/claude/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: key, model }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert('🎉 اتصال به Anthropic Claude موفقیت‌آمیز بود!');
+      } else {
+        alert('❌ خطا در اتصال به Claude: ' + data.error);
+      }
+    } catch (e) {
+      alert('خطا در اتصال: ' + e.message);
+    } finally {
+      els.testClaudeBtn.textContent = '⚡ تست اتصال Claude';
+    }
+  };
+}
+
+els.clearKeyBtn.onclick = () => {
+  saveConfig({ provider: 'bridge', bridgeUrl: 'http://localhost:8765/v1' });
+  providerRadios().forEach(r => r.checked = (r.value === 'bridge'));
+  syncProviderFields();
+  refreshKeyStatus();
+};
+
+window.testBridgeCall = async function() {
+  setLoading(true, 'در حال ارسال پرامپت تستی به پنجره باز Google Chrome برای DeepSeek...');
+  try {
+    const res = await api('/api/session/start', { symptom: 'تست اولیه ارتباط با DeepSeek در پنجره کروم', use_bom: false, max_questions: 1 });
+    alert('🎉 ارتباط با DeepSeek در پنجره کروم برقرار است!\nاولین سوال توسط مدل مطرح شد: ' + (res.question || 'پاسخ دریافت شد.'));
+    location.reload();
+  } catch (e) {
+    showError('خطا در ارتباط با پنجره کروم: ' + e.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Test DeepSeek Bridge Live Button
+if (els.testBridgeBtn) {
+  els.testBridgeBtn.onclick = window.testBridgeCall;
+}
+
+els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) els.settingsModal.classList.remove('show'); };
+
+// ---------- HELPERS ----------
+function showError(msg) {
+  els.errorBanner.textContent = msg;
+  els.errorBanner.classList.add('show');
+}
+function hideError() { els.errorBanner.classList.remove('show'); }
+
+function errorMessage(err, status) {
+  if (status === 502) return 'اتصال به پل وب کروم برقرار نشد. پنجره کروم را باز نگه دارید یا از موتور آفلاین استفاده کنید.';
+  return 'خطا: ' + (err?.detail || err?.error || status || 'نامشخص');
+}
+
+async function api(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const c = getConfig();
+
+  if (c.provider === 'bridge') {
+    headers['x-provider'] = 'bridge';
+    headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
+  } else if (c.provider === 'claude') {
+    headers['x-provider'] = 'claude';
+    if (c.claudeApiKey) headers['x-claude-key'] = c.claudeApiKey;
+    if (c.claudeModel) headers['x-claude-model'] = c.claudeModel;
+  } else if (c.provider === 'gemini') {
+    headers['x-provider'] = 'gemini';
+    if (c.geminiApiKey) headers['x-gemini-key'] = c.geminiApiKey;
+    if (c.geminiModel) headers['x-chat-model'] = c.geminiModel;
+  } else if (c.provider === 'offline') {
+    headers['x-provider'] = 'offline';
+  } else if (c.provider === 'local') {
+    headers['x-provider'] = 'local';
+    if (c.baseUrl) headers['x-base-url'] = c.baseUrl;
+    if (c.chatModel) headers['x-chat-model'] = c.chatModel;
+  } else {
+    headers['x-provider'] = 'cloud';
+    if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
+    if (c.cloudBaseUrl) headers['x-base-url'] = c.cloudBaseUrl;
+    if (c.cloudChatModel) headers['x-chat-model'] = c.cloudChatModel;
+  }
+
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (!res.ok) {
+    const e = new Error(errorMessage(data, res.status));
+    e.handled = true;
+    throw e;
+  }
+  return data;
+}
+
+function faDigits(n) { return String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]); }
+
+const SYSTEM_FA = {
+  engine: 'موتور', electrical: 'برق و مدارات الکترونیک', transmission: 'گیربکس', 'chassis/steering': 'شاسی و فرمان',
+  brakes: 'ترمز', fuel: 'سوخت', HVAC: 'تهویه', body: 'بدنه', 'SRS/airbag': 'ایربگ',
+  infotainment: 'مالتی‌مدیا', other: 'سایر مدارات',
+};
+
+function hide(...ids) { ids.forEach(el => el && el.classList.add('hidden')); }
+function show(...ids) { ids.forEach(el => el && el.classList.remove('hidden')); }
+
+function setLoading(on, text) {
+  els.mainLoadingText.textContent = text || 'در حال پردازش...';
+  els.mainLoading.classList.toggle('hidden', !on);
+}
+
+// ---------- SIDEBAR ----------
+function renderSidebar(state) {
+  if (!state) return;
+  const hy = state.leading_hypotheses || [];
+  if (hy.length) {
+    els.hypoBox.innerHTML = hy.map(h => {
+      const c = Math.max(0, Math.min(100, Number(h.confidence) || 0));
+      const color = c >= 70 ? 'var(--good)' : c >= 40 ? 'var(--warn)' : 'var(--danger)';
+      return `<div class="hypo">
+        <div class="name">${esc(h.hypothesis)}</div>
+        <div class="meter"><div style="width:${c}%;background:${color}"></div></div>
+        <div class="pct">${faDigits(c)}٪</div>
+      </div>`;
+    }).join('');
+  } else {
+    els.hypoBox.innerHTML = '<p class="hint" style="margin:0">هنوز فرضیه‌ای ثبت نشده است.</p>';
+  }
+
+  const mem = state.learned_memory || [];
+  if (mem.length) {
+    els.learnedMemoryBox.innerHTML = mem.map(m => `
+      <div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--border);line-height:1.7">
+        <span style="color:var(--purple);font-weight:700">📌 ${esc(m.title || m.symptom_match)}</span><br>
+        <span style="color:var(--muted)">علت تاییدشده:</span> ${esc(m.learned_root_cause)}
+      </div>
+    `).join('');
+  } else {
+    els.learnedMemoryBox.innerHTML = '<p class="hint" style="margin:0">مورد مشابهی در حافظه گذشته ثبت نشده است.</p>';
+  }
+
+  const ruled = state.ruled_out || [];
+  els.ruledBox.innerHTML = ruled.length ? ruled.map(r => `<li>${esc(r)}</li>`).join('') : '<li>—</li>';
+
+  const bom = state.bom_parts || [];
+  if (bom.length) {
+    const shown = bom.slice(0, 12);
+    els.bomBox.innerHTML = shown.map(p =>
+      `<li>${esc(p.name || p.name_fa)} <span style="color:var(--accent);direction:ltr;display:inline-block">${esc(p.code)}</span>${p.qty ? ` <span style="opacity:.6">×${esc(p.qty)}</span>` : ''}</li>`
+    ).join('') + (bom.length > shown.length ? `<li style="opacity:.6">و ${bom.length - shown.length} قطعه دیگر...</li>` : '');
+  } else {
+    els.bomBox.innerHTML = '<li>BOM غیرفعال است یا قطعه‌ای ثبت نشده است.</li>';
+  }
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function isFallbackOption(opt) {
+  return /هیچ.?کدام|مطابقت ندارد|none of the above|does not match/i.test(opt);
+}
+
+function renderQuestion(data) {
+  hide(els.startCard, els.escalationCard, els.reportCard);
+  show(els.questionCard);
+  els.qLoading.classList.add('hidden');
+  els.freetextBox.classList.remove('show');
+  els.freetextInput.value = '';
+  pendingFallbackOption = null;
+
+  const n = data.questionNumber, max = data.maxQuestions || 8;
+  els.qCounter.textContent = `سوال ${faDigits(n)} از ${faDigits(max)} (استخراج شده با DeepSeek)`;
+  els.progressFill.style.width = `${Math.min(100, ((n - 1) / max) * 100)}%`;
+
+  const sys = data.state?.system;
+  if (sys) {
+    els.systemTag.style.display = 'inline-block';
+    els.systemTag.textContent = 'سیستم: ' + (SYSTEM_FA[sys] || sys);
+  } else {
+    els.systemTag.style.display = 'none';
+  }
+
+  els.questionText.textContent = data.question;
+  els.optionsBox.innerHTML = '';
+  (data.options || []).forEach(opt => {
+    const b = document.createElement('button');
+    b.textContent = opt;
+    if (isFallbackOption(opt)) {
+      b.classList.add('fallback');
+      b.onclick = () => {
+        pendingFallbackOption = opt;
+        els.freetextBox.classList.add('show');
+        els.freetextInput.focus();
+      };
+    } else {
+      b.onclick = () => submitAnswer(opt, '');
+    }
+    els.optionsBox.appendChild(b);
+  });
+  renderSidebar(data.state);
+}
+
+function renderEscalation(data) {
+  hide(els.startCard, els.questionCard, els.reportCard);
+  show(els.escalationCard);
+  els.escTitle.textContent = data.title || 'ارجاع فوری';
+  els.escReason.textContent = data.reason || '';
+  els.escAction.textContent = data.required_action || '';
+  els.escDoNot.textContent = data.do_not || '';
+  renderSidebar(data.state);
+}
+
+function renderReport(data) {
+  hide(els.startCard, els.questionCard, els.escalationCard);
+  show(els.reportCard);
+  lastReportData = data;
+  const rep = data.report || {};
+  els.reportSymptom.textContent = 'علامت گزارش‌شده: ' + (data.state?.symptom || '');
+  els.feedbackSavedMsg.style.display = 'none';
+
+  // Root causes
+  els.rootCauses.innerHTML = (rep.root_causes || []).map((rc, i) => `
+    <div class="rc">
+      <div class="head">
+        <div class="cause">${faDigits(i + 1)}. ${esc(rc.cause)}</div>
+        <span class="band ${esc(rc.band)}">${faDigits(rc.confidence ?? '')}٪ · ${bandFa(rc.band)}</span>
+      </div>
+      ${rc.evidence ? `<div class="evidence">🔎 ${esc(rc.evidence)}</div>` : ''}
+    </div>`).join('') || '<p class="hint">علتی ثبت نشد.</p>';
+
+  // 5-Whys Tree
+  const whys = rep.five_whys || [];
+  if (whys.length) {
+    els.whysTree.innerHTML = whys.map((w, idx) => `
+      <div class="why-node">
+        <b>گام ${faDigits(idx + 1)}:</b> ${esc(w)}
+      </div>
+    `).join('');
+  } else {
+    els.whysTree.innerHTML = '<p class="hint">زنجیره ۵ چرا ثبت نشد.</p>';
+  }
+
+  // 8D Report Grid
+  const d = rep.eight_d_report || {};
+  els.eightDGrid.innerHTML = `
+    <div class="eight-d-item"><b>D1. تیم حل مسئله (Team):</b> ${esc(d.d1_team || '-')}</div>
+    <div class="eight-d-item"><b>D2. توصیف دقیق عیب (Problem Description 5W2H):</b> ${esc(d.d2_problem || '-')}</div>
+    <div class="eight-d-item"><b>D3. اقدامات مهار موقت (Containment Actions):</b> ${esc(d.d3_containment || '-')}</div>
+    <div class="eight-d-item"><b>D4. علت ریشه‌ای قطعی (Root Cause):</b> ${esc(d.d4_root_cause || '-')}</div>
+    <div class="eight-d-item"><b>D5. اقدامات اصلاحی دائم (Corrective Actions PCA):</b> ${esc(d.d5_corrective_actions || '-')}</div>
+    <div class="eight-d-item"><b>D6. صحه‌گذاری اصلاحات (Verification):</b> ${esc(d.d6_verification || '-')}</div>
+    <div class="eight-d-item"><b>D7. اقدامات پیشگیرانه از تکرار (Recurrence Prevention):</b> ${esc(d.d7_prevention || '-')}</div>
+    <div class="eight-d-item"><b>D8. تایید نهایی و بستن پرونده (Closure):</b> ${esc(d.d8_closure || '-')}</div>
+  `;
+
+  const conflicts = rep.unresolved_conflicts || [];
+  els.conflictsList.innerHTML = conflicts.length ? conflicts.map(c => `<li>${esc(c)}</li>`).join('') : '<li>ندارد</li>';
+  els.actionsList.innerHTML = (rep.recommended_actions || []).map(a => `<li>${esc(a)}</li>`).join('');
+  els.escalateIfList.innerHTML = (rep.escalate_if || []).map(a => `<li>${esc(a)}</li>`).join('');
+  if (els.progressFill) els.progressFill.style.width = '100%';
+  renderSidebar(data.state);
+}
+
+function bandFa(b) {
+  return b === 'High' ? 'بالا' : b === 'Medium' ? 'متوسط' : b === 'Low' ? 'پایین' : (b || '');
+}
+
+function handleResponse(data) {
+  sessionId = data.sessionId || sessionId;
+  if (data.escalated) return renderEscalation(data);
+  if (data.concluded) return renderReport(data);
+  if (data.question) return renderQuestion(data);
+  showError('پاسخ نامشخص از سرور دریافت شد.');
+}
+
+// Print 8D Report
+els.printReportBtn.onclick = () => window.print();
+
+// Copy 8D Report Text
+els.copyReportBtn.onclick = () => {
+  if (!lastReportData?.report?.eight_d_report) return;
+  const d = lastReportData.report.eight_d_report;
+  const text = `=======================================================
+  گزارش حل مسئله ۸ مرحله‌ای (8D Quality Report)
+=======================================================
+D1. تیم حل مسئله: ${d.d1_team}
+D2. شرح عیب (5W2H): ${d.d2_problem}
+D3. اقدامات مهار موقت: ${d.d3_containment}
+D4. علت ریشه‌ای: ${d.d4_root_cause}
+D5. اقدامات اصلاحی دائم: ${d.d5_corrective_actions}
+D6. صحه‌گذاری و تست: ${d.d6_verification}
+D7. پیشگیری از تکرار: ${d.d7_prevention}
+D8. تایید و بستن پرونده: ${d.d8_closure}
+=======================================================`;
+  navigator.clipboard.writeText(text).then(() => alert('گزارش 8D در کلیپ‌بورد کپی شد!'));
+};
+
+// ---------- ACTIONS ----------
+async function startSession() {
+  const symptom = els.symptomInput.value.trim();
+  const dtc = els.dtcInput ? els.dtcInput.value.trim() : '';
+  if (!symptom && !dtc) { showError('لطفاً ابتدا علامت یا کد خطای دیاگ (DTC) را وارد کنید.'); return; }
+  hideError();
+  els.startBtn.disabled = true;
+  setLoading(true, 'در حال ارسال سوال به پنجره باز Google Chrome برای هوش مصنوعی DeepSeek...');
+  try {
+    const use_bom = Boolean(els.useBomCheckbox.checked);
+    const data = await api('/api/session/start', { symptom, dtc, use_bom, max_questions: 8 });
+    handleResponse(data);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    els.startBtn.disabled = false;
+    setLoading(false);
+  }
+}
+
+async function submitAnswer(answer, freeText) {
+  hideError();
+  els.qLoading.classList.remove('hidden');
+  [...els.optionsBox.querySelectorAll('button')].forEach(b => b.disabled = true);
+  els.freetextSubmit.disabled = true;
+  try {
+    const data = await api('/api/session/answer', { sessionId, answer, freeText });
+    handleResponse(data);
+  } catch (e) {
+    showError(e.message);
+    [...els.optionsBox.querySelectorAll('button')].forEach(b => b.disabled = false);
+  } finally {
+    els.qLoading.classList.add('hidden');
+    els.freetextSubmit.disabled = false;
+  }
+}
+
+async function extendQuestions() {
+  if (!sessionId) return;
+  hideError();
+  setLoading(true, 'در حال ارسال درخواست به DeepSeek در پنجره کروم...');
+  try {
+    const data = await api('/api/session/extend', { sessionId, extend_by: 4 });
+    handleResponse(data);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function concludeEarly() {
+  if (!sessionId) return;
+  hideError();
+  setLoading(true, 'در حال استنتاج نهایی و دریافت گزارش 8D از DeepSeek در پنجره کروم...');
+  try {
+    const data = await api('/api/session/conclude', { sessionId });
+    handleResponse(data);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function saveFeedback() {
+  if (!sessionId) return;
+  const user_confirmed = els.confirmResultCheckbox.checked;
+  const user_feedback = els.feedbackNotesInput.value.trim();
+  els.saveFeedbackBtn.disabled = true;
+  try {
+    await api('/api/db/cases/feedback', { id: sessionId, user_confirmed, user_feedback });
+    els.feedbackSavedMsg.style.display = 'inline';
+    setTimeout(() => { els.feedbackSavedMsg.style.display = 'none'; }, 5000);
+  } catch (e) {
+    showError('خطا در ثبت بازخورد: ' + e.message);
+  } finally {
+    els.saveFeedbackBtn.disabled = false;
+  }
+}
+
+function resetToStart() {
+  sessionId = null;
+  lastReportData = null;
+  hideError();
+  hide(els.questionCard, els.escalationCard, els.reportCard);
+  show(els.startCard);
+  els.symptomInput.value = '';
+  if (els.dtcInput) els.dtcInput.value = '';
+  els.hypoBox.innerHTML = '<p class="hint" style="margin:0">پس از شروع عیب‌یابی، فرضیه‌ها اینجا نمایش داده می‌شوند.</p>';
+  els.learnedMemoryBox.innerHTML = '<p class="hint" style="margin:0">تجربیات بازیابی‌شده نمایش داده می‌شوند.</p>';
+  els.ruledBox.innerHTML = '<li>—</li>';
+  els.bomBox.innerHTML = '<li>پس از تشخیص سیستم، قطعات BOM مرتبط اینجا نمایش داده می‌شوند.</li>';
+}
+
+els.startBtn.onclick = startSession;
+els.concludeEarlyBtn.onclick = concludeEarly;
+els.extendQuestionsBtn.onclick = extendQuestions;
+els.reportExtendBtn.onclick = extendQuestions;
+els.saveFeedbackBtn.onclick = saveFeedback;
+els.newCaseBtn.onclick = resetToStart;
+els.escNewCase.onclick = resetToStart;
+
+els.symptomInput.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startSession(); });
+els.freetextSubmit.onclick = () => {
+  const t = els.freetextInput.value.trim();
+  if (!t) { showError('لطفاً توضیح خود را بنویسید.'); return; }
+  submitAnswer(pendingFallbackOption || '', t);
+};
+els.freetextCancel.onclick = () => { els.freetextBox.classList.remove('show'); pendingFallbackOption = null; };
+
+document.querySelectorAll('.examples button').forEach(b => {
+  b.onclick = () => { els.symptomInput.value = b.dataset.ex; els.symptomInput.focus(); };
+});
+
+// ---------- PART ANALYSIS ----------
+const partNameInput = $('partNameInput'), partNoInput = $('partNoInput'), partUseBomCheckbox = $('partUseBomCheckbox');
+const partAnalyzeBtn = $('partAnalyzeBtn');
+const partLoading = $('partLoading'), partResult = $('partResult');
+
+fetch('/api/bom').then(r => r.json()).then(d => {
+  const names = [...new Set((d.parts || []).map(p => p.part_name_en || p.part_name_fa).filter(Boolean))];
+  const nos = [...new Set((d.parts || []).flatMap(p => [p.part_no, p.part_code]).filter(Boolean))];
+  $('partNameList').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+  $('partNoList').innerHTML = nos.map(n => `<option value="${esc(n)}">`).join('');
+}).catch(() => {});
+
+function likBadge(l) {
+  const cls = l === 'High' ? 'High' : l === 'Medium' ? 'Medium' : 'Low';
+  const fa = l === 'High' ? 'زیاد' : l === 'Medium' ? 'متوسط' : 'کم';
+  return `<span class="band ${cls}">${fa}</span>`;
+}
+
+async function analyzePart() {
+  const part_name = partNameInput.value.trim();
+  const part_no = partNoInput.value.trim();
+  const use_bom = Boolean(partUseBomCheckbox?.checked);
+  if (!part_name && !part_no) { showError('حداقل یکی از Part Name یا Part No. را وارد کنید.'); return; }
+  hideError();
+  partLoading.classList.remove('hidden');
+  partAnalyzeBtn.disabled = true;
+  partResult.innerHTML = '';
+  try {
+    const d = await api('/api/part/analyze', { part_name, part_no, use_bom });
+    let html = '';
+    if (d.bom_match) {
+      html += `<div class="rc"><div class="cause">✅ تطبیق با BOM: ${esc(d.bom_match.part_name_en || d.bom_match.part_name_fa)}</div>
+        <div class="evidence" dir="ltr" style="text-align:left">Part No: ${esc(d.bom_match.part_no || '-')} | Stock: ${esc(d.bom_match.part_code)}${d.bom_match.qty ? ' | QTY: ' + esc(d.bom_match.qty) : ''}${d.bom_match.size ? ' | ' + esc(d.bom_match.size) : ''}</div>
+        ${d.bom_match.designator ? `<div class="evidence" dir="ltr" style="text-align:left">Refs: ${esc(d.bom_match.designator)}</div>` : ''}</div>`;
+    }
+
+    if (d.pinout) {
+      html += `<div style="background:var(--panel-2);border:1px solid var(--accent);border-radius:10px;padding:12px;margin:12px 0">
+        <h4 style="margin:0 0 6px;color:var(--accent)">📐 نقشه تست پایه‌ها (${esc(d.pinout.package)}):</h4>
+        <div style="font-size:12.5px;line-height:1.8">${esc(d.pinout.test_procedure_fa)}</div>
+      </div>`;
+    }
+
+    if (d.learned_memory?.length) {
+      html += `<h3 style="color:var(--purple);font-size:14px;margin:14px 0 6px">🧠 حافظه دیتابیس یادگیری: تجربیات مشابه</h3><ul style="padding-right:18px;line-height:2;font-size:13px">`;
+      for (const m of d.learned_memory) {
+        html += `<li><b>${esc(m.title)}</b>: علت تاییدشده: ${esc(m.learned_root_cause)} | راهکار: ${esc(m.learned_solution)}</li>`;
+      }
+      html += '</ul>';
+    }
+
+    if (d.known_issues?.length) {
+      for (const cat of d.known_issues) {
+        html += `<h3 style="color:var(--accent);font-size:14px;margin:14px 0 6px">📚 ایرادات شناخته‌شده: ${esc(cat.category)}</h3><ul style="padding-right:18px;line-height:2;font-size:13px">`;
+        for (const i of cat.issues) {
+          html += `<li><b>${esc(i.issue_fa)}</b><br><span style="color:var(--muted)">علت: ${esc(i.cause_fa)} | تشخیص: ${esc(i.detection_fa)}</span></li>`;
+        }
+        html += '</ul>';
+      }
+    }
+
+    const a = d.analysis;
+    if (a && !a.unavailable && a.summary) {
+      html += `<h3 style="color:var(--accent);font-size:14px;margin:14px 0 6px">🤖 تحلیل جامع هوش مصنوعی</h3><p style="font-size:13.5px;line-height:2">${esc(a.summary)}</p>`;
+      if (a.failure_modes?.length) {
+        html += '<div>' + a.failure_modes.map(f => `<div class="rc"><div class="head"><div class="cause" style="font-size:13.5px">${esc(f.mode || f)}</div>${f.likelihood ? likBadge(f.likelihood) : ''}</div>${f.why ? `<div class="evidence">${esc(f.why)}</div>` : ''}</div>`).join('') + '</div>';
+      }
+      if (a.inspection_steps?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">مراحل تست و اندازه‌گیری</h3><ol style="padding-right:18px;line-height:2;font-size:13px">${a.inspection_steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
+    }
+    partResult.innerHTML = html;
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    partLoading.classList.add('hidden');
+    partAnalyzeBtn.disabled = false;
+  }
+}
+
+partAnalyzeBtn.onclick = analyzePart;
+[partNameInput, partNoInput].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') analyzePart(); }));
+
+// ---------- PINOUTS TAB ----------
+async function loadPinoutsData() {
+  try {
+    const list = await fetch('/api/pinouts').then(r => r.json());
+    els.pinoutsContainer.innerHTML = list.map(item => `
+      <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <b style="color:var(--accent);font-size:15px">${esc(item.part_no)} — ${esc(item.name_fa)}</b>
+          <span class="band Medium" dir="ltr">${esc(item.package)} | Stock: ${esc(item.part_code)}</span>
+        </div>
+        <table class="pinout-table">
+          <thead><tr><th>پایه (Pin)</th><th>نام سیگنال</th><th>توضیحات و عملکرد</th></tr></thead>
+          <tbody>
+            ${item.key_pins.map(p => `<tr><td style="font-weight:700;color:var(--accent)">${esc(p.pin)}</td><td dir="ltr" style="text-align:right"><b>${esc(p.name)}</b></td><td>${esc(p.desc)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <div style="margin-top:10px;font-size:13px;background:var(--panel);padding:10px;border-radius:8px;line-height:1.8">
+          <b style="color:var(--good)">روش تست و ولتاژگیری: </b>${esc(item.test_procedure_fa)}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    console.warn('Error loading pinouts:', e);
+  }
+}
+
+// ---------- KNOWLEDGE & DATABASE TAB ----------
+function updateDbStats(s) {
+  els.statTotalCases.textContent = faDigits(s.total_cases || 0);
+  els.statConfirmedCases.textContent = faDigits(s.confirmed_cases || 0);
+  els.statUserKnowledge.textContent = faDigits(s.user_knowledge_count || 0);
+}
+
+async function loadKnowledgeData() {
+  try {
+    const [stats, knowledge, cases] = await Promise.all([
+      fetch('/api/db/stats').then(r => r.json()),
+      fetch('/api/db/knowledge').then(r => r.json()),
+      fetch('/api/db/cases').then(r => r.json()),
+    ]);
+    updateDbStats(stats);
+    renderKnowledgeList(knowledge);
+    renderCasesList(cases);
+  } catch (e) {
+    console.warn('Error loading knowledge data:', e);
+  }
+}
+
+function renderKnowledgeList(list) {
+  if (!list || !list.length) {
+    els.userKnowledgeList.innerHTML = '<p class="hint">هنوز تجربه‌ای ثبت نشده است. از فرم بالا اولین مورد را ثبت کنید.</p>';
+    return;
+  }
+  els.userKnowledgeList.innerHTML = list.map(item => `
+    <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b style="color:var(--accent);font-size:14px">${esc(item.title)}</b>
+        <button onclick="deleteKnowledge('${item.id}')" style="font-size:11.5px;padding:4px 10px;color:var(--danger)">حذف</button>
+      </div>
+      <div style="font-size:13px;line-height:1.8;margin-top:6px">
+        <div><b>علامت:</b> ${esc(item.symptom_trigger || '-')} ${item.part_code ? ` | <b>کد قطعه:</b> <span dir="ltr">${esc(item.part_code)}</span>` : ''}</div>
+        <div><b>علت ریشه‌ای:</b> ${esc(item.root_cause)}</div>
+        ${item.solution ? `<div><b>راهکار:</b> ${esc(item.solution)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderCasesList(cases) {
+  if (!cases || !cases.length) {
+    els.recentCasesList.innerHTML = '<p class="hint">هنوز پرونده‌ای در دیتابیس ثبت نشده است.</p>';
+    return;
+  }
+  els.recentCasesList.innerHTML = cases.map(c => `
+    <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <b>${esc(c.symptom)}</b>
+        <span class="band ${c.user_confirmed ? 'High' : 'Medium'}">${c.user_confirmed ? '✅ تاییدشده توسط تکنسین' : 'ثبت‌شده در حافظه'}</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.8">
+        <div><b>علت تشخیص داده شده:</b> ${esc(c.root_causes?.[0]?.cause || '-')}</div>
+        ${c.user_feedback ? `<div><b>یادداشت تکنسین:</b> ${esc(c.user_feedback)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+window.deleteKnowledge = async function(id) {
+  if (!confirm('آیا از حذف این مورد از پایگاه دانش مطمئن هستید؟')) return;
+  try {
+    await fetch(`/api/db/knowledge/${id}`, { method: 'DELETE' });
+    loadKnowledgeData();
+  } catch (e) {
+    showError(e.message);
+  }
+};
+
+els.addKnowledgeBtn.onclick = async () => {
+  const title = els.kTitleInput.value.trim();
+  const symptom_trigger = els.kSymptomInput.value.trim();
+  const part_code = els.kPartCodeInput.value.trim();
+  const root_cause = els.kRootCauseInput.value.trim();
+  const solution = els.kSolutionInput.value.trim();
+
+  if (!title && !root_cause) {
+    showError('عنوان و علت ریشه‌ای الزامی هستند.');
+    return;
+  }
+  hideError();
+  els.addKnowledgeBtn.disabled = true;
+  try {
+    await fetch('/api/db/knowledge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, symptom_trigger, part_code, root_cause, solution }),
+    });
+    els.kTitleInput.value = ''; els.kSymptomInput.value = ''; els.kPartCodeInput.value = '';
+    els.kRootCauseInput.value = ''; els.kSolutionInput.value = '';
+    loadKnowledgeData();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    els.addKnowledgeBtn.disabled = false;
+  }
+};
+
+// Export DB
+els.exportDbBtn.onclick = () => window.open('/api/db/export', '_blank');
+
+// Import DB
+els.importDbBtn.onclick = () => els.importDbInput.click();
+els.importDbInput.onchange = async () => {
+  const file = els.importDbInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const json = JSON.parse(e.target.result);
+      const res = await api('/api/db/import', json);
+      alert(`✅ دیتابیس با موفقیت وارد شد!\nتجربیات واردشده: ${res.imported_knowledge}\nپرونده‌های واردشده: ${res.imported_cases}`);
+      loadKnowledgeData();
+    } catch (err) {
+      showError('خطا در واردسازی دیتابیس: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+};

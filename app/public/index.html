@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>دستیار عیب‌یابی و گزارش 8D — DeepSeek Selenium Chrome</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-2: #0ea5e9;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --purple: #a855f7;
+    --deepseek: #0284c7;
+    --deepseek-grad: linear-gradient(135deg, #0284c7, #38bdf8);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Vazirmatn", "Segoe UI", Tahoma, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 20;
+    flex-wrap: wrap; gap: 10px;
+  }
+  header h1 { font-size: 16px; margin: 0; display:flex; align-items:center; gap:8px; }
+  header h1 .logo { font-size: 20px; }
+  .engine-badge {
+    background: var(--deepseek-grad); color: #04121d; font-size: 11.5px; font-weight: 800;
+    padding: 3px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .nav-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .nav-tabs button {
+    font-size: 13px; padding: 7px 13px; border-radius: 9px;
+    background: transparent; color: var(--muted); border: 1px solid transparent;
+  }
+  .nav-tabs button.active {
+    background: var(--panel-2); color: var(--accent); border-color: var(--border); font-weight:700;
+  }
+  .key-status { font-size: 12px; color: var(--muted); display:flex; align-items:center; gap:8px; }
+  .dot { width:9px; height:9px; border-radius:50%; background: var(--danger); display:inline-block; }
+  .dot.ok { background: var(--good); }
+  button {
+    font-family: inherit; cursor: pointer; border: none;
+    border-radius: 10px; padding: 9px 15px; font-size: 13.5px;
+    background: var(--panel-2); color: var(--text);
+    transition: background .15s, transform .05s;
+  }
+  button:hover { background: #31415c; }
+  button:active { transform: scale(.98); }
+  button.primary { background: var(--accent-2); color: #04121d; font-weight: 700; }
+  button.primary:hover { background: var(--accent); }
+  button.success { background: var(--good); color: #04121d; font-weight: 700; }
+  button.purple { background: var(--purple); color: #fff; font-weight: 700; }
+  button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  main { max-width: 1140px; margin: 0 auto; padding: 20px 16px 60px; display: grid; grid-template-columns: 1fr 330px; gap: 20px; }
+  @media (max-width: 920px) { main { grid-template-columns: 1fr; } }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 6px; font-size: 17px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.9; }
+
+  textarea, input[type="text"], input[type="password"], select {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 13px; font-family: inherit; font-size: 14.5px;
+    resize: vertical;
+  }
+  textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent-2); border-color: transparent; }
+
+  .input-with-mic { position: relative; }
+  .mic-btn {
+    position: absolute; left: 10px; bottom: 12px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+    font-size: 13px; color: var(--muted); cursor: pointer;
+  }
+  .mic-btn.listening { background: var(--danger); color: #fff; animation: pulse 1s infinite; }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+  .examples { display:flex; flex-wrap:wrap; gap:8px; margin: 12px 0 16px; }
+  .examples button { font-size: 12.5px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); }
+  .examples button:hover { color: var(--text); border-color: var(--accent-2); }
+
+  .progress { display:flex; align-items:center; gap:10px; margin-bottom: 14px; }
+  .progress .bar { flex:1; height: 8px; border-radius: 999px; background: var(--panel-2); overflow:hidden; }
+  .progress .bar > div { height:100%; background: var(--deepseek-grad); border-radius: 999px; transition: width .3s; }
+  .progress span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  .question-text { font-size: 16.5px; font-weight: 700; line-height: 2; margin: 4px 0 16px; }
+  .options { display: flex; flex-direction: column; gap: 10px; }
+  .options button {
+    text-align: right; padding: 13px 16px; font-size: 15px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 12px; line-height: 1.8;
+  }
+  .options button:hover { border-color: var(--accent-2); background:#2b3a54; }
+  .options button.fallback { border-style: dashed; color: var(--muted); }
+
+  .freetext-box { margin-top: 12px; display: none; }
+  .freetext-box.show { display: block; }
+  .freetext-actions { margin-top: 10px; display: flex; gap: 10px; }
+
+  .q-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+  .spinner { display:inline-block; width:18px; height:18px; border:3px solid var(--border); border-top-color: var(--accent); border-radius:50%; animation: spin .8s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-row { display:flex; align-items:center; gap:10px; color: var(--muted); font-size:14px; padding: 8px 0; }
+
+  .sidebar .card { margin-bottom: 16px; }
+  .sidebar h3 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; }
+  .hypo { display:flex; flex-direction:column; gap:4px; margin-bottom: 12px; }
+  .hypo .name { font-size: 13.5px; line-height:1.7; }
+  .hypo .meter { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .hypo .meter > div { height: 100%; border-radius: 999px; }
+  .hypo .pct { font-size: 11.5px; color: var(--muted); }
+  .ruled { font-size: 12.5px; color: var(--muted); line-height:1.8; padding-right: 14px; margin:0; }
+  .tag { display:inline-block; font-size: 11.5px; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); color: var(--accent); margin-bottom: 8px;}
+
+  .report .rc { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: var(--panel-2); }
+  .report .rc .head { display:flex; justify-content: space-between; align-items:center; gap: 10px; flex-wrap: wrap; }
+  .report .rc .cause { font-weight: 700; font-size: 15px; line-height: 1.9; }
+  .band { font-size: 12px; padding: 3px 12px; border-radius: 999px; font-weight:700; white-space:nowrap; }
+  .band.High { background: rgba(52,211,153,.15); color: var(--good); }
+  .band.Medium { background: rgba(251,191,36,.15); color: var(--warn); }
+  .band.Low { background: rgba(248,113,113,.15); color: var(--danger); }
+  .report .evidence { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.9; }
+  .report h3 { font-size: 15px; margin: 20px 0 8px; color: var(--accent); }
+  .report ul, .report ol { margin: 0; padding-right: 20px; line-height: 2.1; font-size: 14px; }
+
+  /* 5-Whys Flowchart */
+  .whys-tree { display:flex; flex-direction:column; gap:8px; margin: 12px 0 16px; }
+  .why-node {
+    background: var(--panel-2); border-right: 4px solid var(--accent);
+    padding: 10px 14px; border-radius: 8px; font-size: 13.5px; line-height: 1.8;
+  }
+
+  /* 8D Section */
+  .eight-d-box {
+    margin-top: 22px; padding: 18px; border: 1px solid var(--accent);
+    border-radius: 12px; background: rgba(56,189,248,.04);
+  }
+  .eight-d-box h3 { color: var(--accent); margin: 0 0 12px; }
+  .eight-d-grid { display:grid; grid-template-columns: 1fr; gap:10px; font-size:13.5px; }
+  .eight-d-item { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .eight-d-item b { color: var(--accent); display:block; margin-bottom:3px; }
+
+  .feedback-box {
+    margin-top: 20px; padding: 16px; border: 1px solid var(--purple);
+    border-radius: 12px; background: rgba(168,85,247,.08);
+  }
+  .feedback-box h4 { margin: 0 0 8px; font-size: 14px; color: var(--purple); }
+
+  .escalation { border: 1px solid var(--danger); background: rgba(248,113,113,.08); }
+  .escalation h2 { color: var(--danger); display:flex; gap: 8px; align-items:center;}
+  .escalation .row { margin-bottom: 12px; font-size: 14.5px; line-height: 2; }
+  .escalation .row b { color: var(--danger); }
+
+  .error-banner {
+    background: rgba(248,113,113,.12); border: 1px solid var(--danger);
+    color: #fecaca; padding: 12px 16px; border-radius: 10px;
+    font-size: 13.5px; margin-bottom: 14px; line-height: 1.9; display:none;
+  }
+  .error-banner.show { display:block; }
+
+  .stats-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  .stat-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align:center; }
+  .stat-card .num { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+  .stat-card .lbl { font-size: 12px; color: var(--muted); }
+
+  /* Pinout table */
+  .pinout-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  .pinout-table th, .pinout-table td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--border); }
+  .pinout-table th { background: var(--panel-2); color: var(--accent); }
+
+  /* modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.65);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; width: min(560px, 92vw); max-height: 90vh; overflow-y: auto;
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 17px; }
+  .modal-actions { display:flex; gap:10px; margin-top: 16px; justify-content: flex-start; }
+  .provider-tabs { display:flex; flex-direction:column; gap:8px; margin: 10px 0 16px; }
+  .provider-tabs label { font-size: 13.5px; display:flex; align-items:center; gap:8px; cursor:pointer; padding:9px 12px; border:1px solid var(--border); border-radius:10px; }
+  .provider-tabs label:has(input:checked) { border-color: var(--accent-2); background: rgba(14,165,233,.08); }
+  .fld { display:block; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+  .fld input, .fld textarea, .fld select { margin-top: 5px; font-size: 13.5px; }
+  .hidden { display: none !important; }
+
+  /* Print Styles for 8D */
+  @media print {
+    body { background: #fff !important; color: #000 !important; font-size: 12pt; }
+    header, aside, .q-actions, .nav-tabs, .feedback-box, #startCard, #questionCard, button { display: none !important; }
+    main { grid-template-columns: 1fr !important; max-width: 100% !important; padding: 0 !important; }
+    .card, .eight-d-box, .eight-d-item, .rc { background: #fff !important; color: #000 !important; border: 1px solid #ccc !important; box-shadow: none !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <span class="logo">🔧</span> دستیار عیب‌یابی و گزارش 8D 
+    <span class="engine-badge">🌐 DeepSeek Chrome Web Driver</span>
+  </h1>
+  <nav class="nav-tabs">
+    <button class="active" id="tabDiagnosisBtn">🔧 عیب‌یابی</button>
+    <button id="tabPartBtn">🔎 تحلیل قطعه و تست</button>
+    <button id="tabPinoutsBtn">📐 نقشه تست پایه‌ها</button>
+    <button id="tabKnowledgeBtn">🧠 دیتابیس و یادگیری</button>
+  </nav>
+  <div style="display:flex;align-items:center;gap:10px">
+    <button id="uploadBomBtn" style="font-size:12px;padding:6px 10px" title="آپلود فایل اکسل BOM جدید">📁 آپلود BOM</button>
+    <input type="file" id="bomFileInput" accept=".xlsx,.xls,.csv" style="display:none" />
+    <span class="key-status"><span id="keyDot" class="dot ok"></span><span id="keyText">کروم DeepSeek</span></span>
+    <button id="settingsBtn">⚙️ تنظیمات مدل</button>
+  </div>
+</header>
+
+<main>
+  <section id="mainCol">
+    <div id="errorBanner" class="error-banner"></div>
+
+    <!-- Live Bridge Banner -->
+    <div id="bridgeNotice" style="background:rgba(2,132,199,.1);border:1px solid var(--accent);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>🌐 <b>حالت فعال:</b> سوالات عیب‌یابی به صورت زنده از طریق پنجره باز <b>Google Chrome</b> به <b>DeepSeek</b> ارسال می‌شوند.</span>
+      <button id="testBridgeBtn" style="font-size:12px;padding:5px 10px;background:var(--accent-2);color:#04121d;font-weight:700">⚡ تست ارسال پیام</button>
+    </div>
+
+    <!-- TAB 1: Guided Diagnosis -->
+    <div class="tab-content active" id="tabDiagnosis">
+      <!-- Start card -->
+      <div class="card" id="startCard">
+        <h2>شروع عیب‌یابی هدایت‌شده با DeepSeek</h2>
+        <p class="hint">علامت خرابی را بنویسید یا با دکمه میکروفون بگویید. پرامپت‌ها در پنجره باز کروم به هوش مصنوعی DeepSeek ارسال شده و پاسخ‌ها، درخت ۵ چرا و گزارش کامل 8D اینجا دریافت می‌شوند.</p>
+        
+        <div style="display:grid;grid-template-columns:1fr 180px;gap:10px;margin-bottom:10px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="useBomCheckbox" checked />
+            <span>🧩 استفاده از BOM برد <span style="color:var(--muted);font-size:11.5px">(فعال)</span></span>
+          </label>
+          <div style="position:relative">
+            <input type="text" id="dtcInput" list="dtcList" placeholder="کد خطای DTC (اختیاری)" dir="ltr" style="padding:7px 10px;font-size:13px" />
+            <datalist id="dtcList"></datalist>
+          </div>
+        </div>
+
+        <div class="input-with-mic">
+          <textarea id="symptomInput" rows="3" placeholder="مثلاً: ارتباط شبکه CAN بعد از مونتاژ برد قطع است یا ولتاژ ۵ ولت صفر شده..."></textarea>
+          <button type="button" class="mic-btn" id="micBtn" title="ورودی صوتی (صحبت کنید)">🎤 ورودی صوتی</button>
+        </div>
+
+        <div class="examples">
+          <button data-ex="برد SBM روشن نمی‌شود و ولتاژ ۵ ولت صفر است">روشن نشدن برد SBM</button>
+          <button data-ex="ارتباط CAN با نود مرکزی قطع است و پیام ارسال نمی‌شود">قطع ارتباط CAN</button>
+          <button data-ex="موتور در استارت سرد صدای تق‌تق می‌دهد">صدای تق‌تق استارت سرد</button>
+          <button data-ex="کولر باد گرم می‌زند و خنک نمی‌کند">کولر خنک نمی‌کند</button>
+        </div>
+        <button class="primary" id="startBtn">شروع عیب‌یابی در پنجره کروم</button>
+      </div>
+
+      <!-- Question card -->
+      <div class="card hidden" id="questionCard">
+        <div class="progress">
+          <span id="qCounter">سوال ۱ از ۸</span>
+          <div class="bar"><div id="progressFill" style="width:0%"></div></div>
+        </div>
+        <div class="tag" id="systemTag" style="display:none"></div>
+        <div class="question-text" id="questionText"></div>
+        <div class="options" id="optionsBox"></div>
+        <div class="freetext-box" id="freetextBox">
+          <textarea id="freetextInput" rows="2" placeholder="توضیح خود را بنویسید..."></textarea>
+          <div class="freetext-actions">
+            <button class="primary" id="freetextSubmit">ارسال توضیح</button>
+            <button id="freetextCancel">انصراف</button>
+          </div>
+        </div>
+        <div class="q-actions">
+          <button id="concludeEarlyBtn" class="secondary">📊 صدور گزارش نهایی هم‌اکنون با DeepSeek</button>
+          <button id="extendQuestionsBtn" class="secondary">➕ افزودن ۴ سوال تکمیلی (+۴)</button>
+        </div>
+        <div class="loading-row hidden" id="qLoading"><span class="spinner"></span><span>در حال ارسال سوال و دریافت پاسخ از DeepSeek در پنجره کروم...</span></div>
+      </div>
+
+      <!-- Escalation card -->
+      <div class="card escalation hidden" id="escalationCard">
+        <h2>⛔ <span id="escTitle">ارجاع فوری</span></h2>
+        <div class="row"><b>دلیل: </b><span id="escReason"></span></div>
+        <div class="row"><b>اقدام لازم: </b><span id="escAction"></span></div>
+        <div class="row"><b>انجام ندهید: </b><span id="escDoNot"></span></div>
+        <button class="primary" id="escNewCase">شروع پرونده جدید</button>
+      </div>
+
+      <!-- Report card -->
+      <div class="card report hidden" id="reportCard">
+        <h2>📋 گزارش تحلیلی عیب‌یابی (تحلیل کامل هوش مصنوعی DeepSeek)</h2>
+        <p class="hint" id="reportSymptom"></p>
+        
+        <h3>علت(های) ریشه‌ای</h3>
+        <div id="rootCauses"></div>
+
+        <!-- 5-Whys Tree -->
+        <h3>🔍 تحلیل زنجیره علی ۵ چرا (5-Whys Tree)</h3>
+        <div class="whys-tree" id="whysTree"></div>
+
+        <!-- 8D Quality Report -->
+        <div class="eight-d-box" id="eightDBox">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <h3>📑 فرم گزارش رسمی حل مسئله ۸ مرحله‌ای (8D Report)</h3>
+            <div style="display:flex;gap:6px">
+              <button class="secondary" id="printReportBtn" style="font-size:12px">🖨️ چاپ / ذخیره PDF</button>
+              <button class="secondary" id="copyReportBtn" style="font-size:12px">📋 کپی متن 8D</button>
+            </div>
+          </div>
+          <div class="eight-d-grid" id="eightDGrid"></div>
+        </div>
+
+        <h3>اقدام پیشنهادی تکنسین</h3>
+        <ol id="actionsList"></ol>
+        
+        <h3>تناقض‌های حل‌نشده و شرایط ارجاع</h3>
+        <ul id="conflictsList"></ul>
+        <ul id="escalateIfList"></ul>
+
+        <!-- Feedback & Learning Box -->
+        <div class="feedback-box">
+          <h4>🧠 ثبت بازخورد در حافظه یادگیری دیتابیس</h4>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:8px;cursor:pointer">
+            <input type="checkbox" id="confirmResultCheckbox" checked />
+            <b>تایید می‌کنم این علت ریشه‌ای صحیح بود و در حافظه یادگیری ذخیره شود</b>
+          </label>
+          <textarea id="feedbackNotesInput" rows="2" placeholder="یادداشت تکمیلی تکنسین (اختیاری): مثلاً با تعویض دیود ESD مشکل حل شد..."></textarea>
+          <div style="margin-top:8px">
+            <button class="purple" id="saveFeedbackBtn">💾 ثبت بازخورد در دیتابیس یادگیری</button>
+            <span id="feedbackSavedMsg" style="color:var(--good);font-size:13px;margin-right:10px;display:none">✅ در حافظه دیتابیس ثبت شد!</span>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+          <button class="primary" id="newCaseBtn">شروع پرونده جدید</button>
+          <button class="secondary" id="reportExtendBtn">➕ ادامه عیب‌یابی و پرسیدن سوالات بیشتر (+۴)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: Part Analysis -->
+    <div class="tab-content" id="tabPart">
+      <div class="card">
+        <h2>🔎 تحلیل قطعه (Part Name + Part No.)</h2>
+        <p class="hint">اطلاعات قطعه را وارد کنید — نتیجه: تطبیق با BOM، بررسی نقشه تست پایه‌ها، و تحلیل حالت‌های خرابی با هوش مصنوعی.</p>
+        
+        <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text);margin-bottom:12px;cursor:pointer">
+          <input type="checkbox" id="partUseBomCheckbox" checked />
+          <span>🧩 تطبیق با قطعات BOM برد</span>
+        </label>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <label class="fld">Part Name (نام قطعه)
+            <input type="text" id="partNameInput" list="partNameList" placeholder="IC, CAN Tranceiver" dir="ltr" />
+            <datalist id="partNameList"></datalist>
+          </label>
+          <label class="fld">Part No. (شماره قطعه)
+            <input type="text" id="partNoInput" list="partNoList" placeholder="TJA1055T/3" dir="ltr" />
+            <datalist id="partNoList"></datalist>
+          </label>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:10px">
+          <button class="primary" id="partAnalyzeBtn">تحلیل قطعه</button>
+        </div>
+        <div class="loading-row hidden" id="partLoading"><span class="spinner"></span><span>در حال تحلیل قطعه در پنجره DeepSeek...</span></div>
+        <div id="partResult" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <!-- TAB 3: Pinouts & Electronics Test Points -->
+    <div class="tab-content" id="tabPinouts">
+      <div class="card">
+        <h2>📐 نقشه تست پایه‌ها، ولتاژها و سیگنال‌های کلیدی قطعات</h2>
+        <p class="hint">راهنمای تست ولتاژ و اسیلوسکوپ برای آی‌سی‌ها و قطعات کلیدی برد SBM/IKCO.</p>
+        <div id="pinoutsContainer"></div>
+      </div>
+    </div>
+
+    <!-- TAB 4: Database & Learning Knowledge -->
+    <div class="tab-content" id="tabKnowledge">
+      <div class="card">
+        <h2>🧠 پایگاه دانش، دیتابیس و یادگیری تجربی</h2>
+        <p class="hint">مدیریت تجربیات ثبت‌شده، پشتیبان‌گیری و تاریخچه پرونده‌های حل‌شده در دیتابیس.</p>
+        
+        <div class="stats-grid">
+          <div class="stat-card"><div class="num" id="statTotalCases">0</div><div class="lbl">کل پرونده‌ها</div></div>
+          <div class="stat-card"><div class="num" id="statConfirmedCases">0</div><div class="lbl">پرونده‌های تاییدشده</div></div>
+          <div class="stat-card"><div class="num" id="statUserKnowledge">0</div><div class="lbl">تجربیات ثبت‌شده</div></div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <button class="secondary" id="exportDbBtn">💾 دانلود فایل پشتیبان دیتابیس (JSON)</button>
+          <button class="secondary" id="importDbBtn">📥 واردسازی فایل پشتیبان</button>
+          <input type="file" id="importDbInput" accept=".json" style="display:none" />
+        </div>
+
+        <h3>➕ ثبت تجربه / قانون خرابی جدید در دیتابیس</h3>
+        <div style="background:var(--panel-2);padding:14px;border-radius:12px;border:1px solid var(--border);margin-bottom:18px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <label class="fld">عنوان عیب / قطعه
+              <input type="text" id="kTitleInput" placeholder="مثلاً: خرابی ترنسیور TJA1055 در شبکه CAN" />
+            </label>
+            <label class="fld">علامت تشخیصی (Symptom Trigger)
+              <input type="text" id="kSymptomInput" placeholder="مثلاً: خطای ارتباط CAN_H به بدنه" />
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <label class="fld">پارت نامبر یا کد قطعه (اختیاری)
+              <input type="text" id="kPartCodeInput" placeholder="مثلاً: 1111097 یا TJA1055T/3" dir="ltr" />
+            </label>
+            <label class="fld">علت ریشه‌ای تایید شده
+              <input type="text" id="kRootCauseInput" placeholder="مثلاً: سوختن دیود ESD مدل PESD2CAN در اثر شوک ولتاژ" />
+            </label>
+          </div>
+          <label class="fld">راهکار رفع عیب و اقدام پیشنهادی
+            <textarea id="kSolutionInput" rows="2" placeholder="مثلاً: تست ولتاژ پایه ERR_N، تعویض PESD2CAN و تست مقاومت ترمینیشن ۱۲۰ اهم..."></textarea>
+          </label>
+          <button class="primary" id="addKnowledgeBtn" style="margin-top:6px">💾 ثبت تجربه در دیتابیس</button>
+        </div>
+
+        <h3>📚 تجربیات ثبت‌شده کاربر</h3>
+        <div id="userKnowledgeList" style="margin-bottom:20px"><p class="hint">در حال بارگذاری تجربیات...</p></div>
+
+        <h3>📁 تاریخچه پرونده‌های اخیر عیب‌یابی در دیتابیس</h3>
+        <div id="recentCasesList"><p class="hint">در حال بارگذاری پرونده‌ها...</p></div>
+      </div>
+    </div>
+
+    <div class="loading-row hidden card" id="mainLoading" style="margin-top:16px">
+      <span class="spinner"></span><span id="mainLoadingText">در حال پردازش...</span>
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    <div class="card">
+      <h3>💡 فرضیه‌های پیشرو</h3>
+      <div id="hypoBox"><p class="hint" style="margin:0">پس از شروع عیب‌یابی، فرضیه‌ها اینجا نمایش داده می‌شوند.</p></div>
+    </div>
+    <div class="card">
+      <h3>🧠 حافظه تجربی دیتابیس</h3>
+      <div id="learnedMemoryBox"><p class="hint" style="margin:0">تجربیات بازیابی‌شده از دیتابیس نمایش داده می‌شوند.</p></div>
+    </div>
+    <div class="card">
+      <h3>❌ رد شده</h3>
+      <ul class="ruled" id="ruledBox"><li>—</li></ul>
+    </div>
+    <div class="card">
+      <h3>🧩 قطعات مرتبط (BOM)</h3>
+      <ul class="ruled" id="bomBox"><li>پس از تشخیص سیستم، قطعات BOM مرتبط اینجا نمایش داده می‌شوند.</li></ul>
+    </div>
+  </aside>
+</main>
+
+<!-- Settings modal -->
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal">
+    <h2>تنظیمات مدل هوش مصنوعی</h2>
+    <div class="provider-tabs">
+      <label><input type="radio" name="provider" value="bridge" checked /> 🌐 <b>مرورگر کروم و پل وب DeepSeek (پیش‌فرض اصلی سیستم)</b></label>
+      <label><input type="radio" name="provider" value="claude" /> 🧠 Anthropic Claude (Claude 3.5 Sonnet / Claude Code)</label>
+      <label><input type="radio" name="provider" value="gemini" /> ⚡ Google Gemini (gemini-1.5-flash — رایگان)</label>
+      <label><input type="radio" name="provider" value="offline" /> 🔌 موتور هوش مصنوعی آفلاین (بدون اینترنت و رایگان)</label>
+      <label><input type="radio" name="provider" value="cloud" /> ☁️ سایر سرویس‌های ابری (DeepSeek Cloud / OpenAI)</label>
+      <label><input type="radio" name="provider" value="local" /> 🦙 مدل‌های محلی سیستم (Ollama)</label>
+    </div>
+
+    <!-- Claude Fields -->
+    <div id="claudeFields" style="display:none">
+      <label class="fld">کلید Anthropic Claude API (یا کلیدهای چندگانه جداشده با کاما)
+        <input type="password" id="claudeApiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off" />
+      </label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="fld">نسخه مدل Claude
+          <select id="claudeModelSelect">
+            <option value="claude-3-5-sonnet-20241022" selected>claude-3-5-sonnet (هوشمندترین)</option>
+            <option value="claude-3-5-haiku-20241022">claude-3-5-haiku (پرسرعت)</option>
+            <option value="claude-3-opus-20240229">claude-3-opus</option>
+          </select>
+        </label>
+        <div style="display:flex;align-items:flex-end">
+          <button type="button" id="testClaudeBtn" style="width:100%;padding:9px;background:var(--purple);color:#fff;font-size:12.5px;margin-bottom:10px">⚡ تست اتصال Claude</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bridge Fields (Default) -->
+    <div id="bridgeFields">
+      <div style="background:rgba(2,132,199,.08);border:1px solid var(--accent);border-radius:10px;padding:12px;font-size:13px;line-height:1.9;margin-bottom:12px">
+        <b style="color:var(--accent)">🌐 حالت پیش‌فرض: پنجره باز Google Chrome برای DeepSeek</b><br>
+        با اجرای برنامه، پنجره کروم به سایت chat.deepseek.com متصل شده و سوالات عیب‌یابی را مستقیماً از هوش مصنوعی دریافت می‌کند.
+      </div>
+      <label class="fld">آدرس پل ارتباطی
+        <input type="text" id="bridgeUrlInput" value="http://localhost:8765/v1" dir="ltr" />
+      </label>
+    </div>
+
+    <!-- Gemini Fields -->
+    <div id="geminiFields" style="display:none">
+      <label class="fld">کلید Google Gemini API
+        <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." autocomplete="off" />
+      </label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="fld">نسخه مدل
+          <select id="geminiModelSelect">
+            <option value="gemini-1.5-flash" selected>gemini-1.5-flash</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <!-- Offline Fields -->
+    <div id="offlineFields" style="display:none">
+      <div style="background:rgba(52,211,153,.08);border:1px solid var(--good);border-radius:10px;padding:12px;font-size:13px;line-height:1.9">
+        <b style="color:var(--good)">✅ حالت مستقل ۱۰۰٪ آفلاین:</b> اجرای محلی بدون نیاز به هیچ‌گونه اینترنت.
+      </div>
+    </div>
+
+    <!-- Cloud Fields -->
+    <div id="cloudFields" style="display:none">
+      <label class="fld">کلید API
+        <input type="password" id="apiKeyInput" placeholder="کلید API..." autocomplete="off" />
+      </label>
+      <label class="fld" style="margin-top:10px">آدرس سرور (Base URL)
+        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.deepseek.com" dir="ltr" />
+      </label>
+    </div>
+
+    <!-- Local Fields -->
+    <div id="localFields" style="display:none">
+      <label class="fld">آدرس سرور لوکال
+        <input type="text" id="baseUrlInput" placeholder="http://localhost:11434/v1" dir="ltr" />
+      </label>
+      <label class="fld">نام مدل
+        <input type="text" id="chatModelInput" placeholder="deepseek-r1:8b" dir="ltr" />
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="primary" id="saveKeyBtn">ذخیره تنظیمات</button>
+      <button id="clearKeyBtn">بازنشانی به پیش‌فرض (کروم DeepSeek)</button>
+      <button id="closeModalBtn">بستن</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
