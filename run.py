@@ -2,14 +2,10 @@
 """
 اجراکننده خودکار و یکپارچه «دستیار عیب‌یابی هدایت‌شده و گزارش 8D»
 ==================================================================
-مجهز به هوش مصنوعی پیش‌فرض Google Gemini (gemini-1.5-flash)
-
-فقط این فایل را اجرا کنید:  python run.py
-(یا در ویندوز روی آن دابل‌کلیک کنید)
-
- 1. بررسی و راه‌اندازی سرور اصلی و پایگاه دانش (Port 3000)
- 2. فعال‌سازی پیش‌فرض مدل Google Gemini 1.5 Flash (با فال‌بک خودکار به موتور آفلاین)
- 3. باز کردن خودکار مرورگر روی http://localhost:3000
+ 1. باز کردن قطعی و خودکار برنامه در مرورگر Google Chrome
+ 2. بررسی و نصب خودکار وابستگی‌های پایتون (Flask, Selenium) و Node.js
+ 3. راه‌اندازی پل وب سلنیوم DeepSeek (پورت 8765)
+ 4. راه‌اندازی سرور اصلی و پایگاه دانش (پورت 3000)
 """
 
 import os
@@ -20,7 +16,6 @@ import sys
 import time
 import webbrowser
 
-os.environ["SE_OFFLINE"] = "true"
 os.environ["LLM_PROVIDER"] = os.environ.get("LLM_PROVIDER", "gemini")
 os.environ["GEMINI_MODEL"] = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
@@ -47,42 +42,94 @@ def find(cmd):
     return shutil.which(cmd) or (shutil.which(cmd + ".cmd") if os.name == "nt" else None)
 
 
+def find_chrome_executable():
+    """پیدا کردن مسیر قطعی Google Chrome در سیستم کاربر"""
+    if os.name == "nt":
+        paths = [
+            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google\\Chrome\\Application\\chrome.exe"),
+            os.path.join(os.environ.get("USERPROFILE", ""), "AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        ]
+        for p in paths:
+            if os.path.isfile(p):
+                return p
+    else:
+        for name in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"]:
+            w = shutil.which(name)
+            if w:
+                return w
+    return None
+
+
+def open_in_chrome(url):
+    """باز کردن قطعی آدرس در مرورگر Google Chrome"""
+    chrome_path = find_chrome_executable()
+    if chrome_path:
+        say(f"🌐 در حال باز کردن برنامه در Google Chrome: {chrome_path}")
+        try:
+            subprocess.Popen([chrome_path, url])
+            return True
+        except Exception as e:
+            say(f"⚠️ باز کردن مستقیم کروم با خطا مواجه شد ({e})، استفاده از مرورگر پیش‌فرض...")
+    
+    try:
+        webbrowser.open(url)
+        return True
+    except Exception:
+        return False
+
+
 def port_open(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def ensure_python_deps():
+    """بررسی و نصب خودکار Flask و Selenium در پایتون برای کارکرد بدون دردسر پل"""
+    missing = []
+    try: import flask # noqa
+    except ImportError: missing.append("flask")
+    try: import selenium # noqa
+    except ImportError: missing.append("selenium")
+
+    if missing:
+        say(f"📦 در حال نصب خودکار پکیج‌های پایتون ({', '.join(missing)})...")
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True)
+            say("✅ پکیج‌های پایتون با موفقیت نصب شدند.")
+            return True
+        except Exception as e:
+            say(f"⚠️ نصب خودکار پکیج‌های پایتون با خطا مواجه شد: {e}")
+            return False
+    return True
+
+
 def deps_ok():
     return os.path.isdir(os.path.join(APP_DIR, "node_modules", "express"))
 
 
-def install_deps(npm):
-    say("📦 در حال بررسی و نصب وابستگی‌های برنامه...")
+def install_node_deps(npm):
+    say("📦 در حال بررسی و نصب وابستگی‌های Node.js...")
     r = subprocess.run([npm, "install", "--no-audit", "--no-fund"], cwd=APP_DIR)
     if r.returncode != 0 or not deps_ok():
-        fail("نصب وابستگی‌ها ناموفق بود.")
-    say("✅ وابستگی‌ها نصب شد.")
-
-
-def check_python_bridge_deps():
-    try:
-        import flask  # noqa
-        import selenium  # noqa
-        return True
-    except ImportError:
-        return False
+        fail("نصب وابستگی‌های Node.js ناموفق بود.")
+    say("✅ وابستگی‌های Node.js نصب شد.")
 
 
 def start_bridge():
     if not os.path.isfile(BRIDGE_SCRIPT):
         return None
-    if not check_python_bridge_deps():
-        return None
+    ensure_python_deps()
+    say("🌐 در حال راه‌اندازی پل وب DeepSeek و مرورگر کروم...")
     try:
         proc = subprocess.Popen([sys.executable, BRIDGE_SCRIPT], cwd=os.path.dirname(BRIDGE_SCRIPT))
         return proc
-    except Exception:
+    except Exception as e:
+        say(f"⚠️ اجرای پل وب با خطا مواجه شد: {e}")
         return None
 
 
@@ -93,7 +140,7 @@ def start_server(node):
 def main():
     say("=" * 68)
     say("  🔧 دستیار تخصصی عیب‌یابی خودرو و گزارش کیفیت 8D")
-    say("  ⚡ مدل هوش مصنوعی پیش‌فرض: Google Gemini 1.5 Flash")
+    say("  🌐 اجرا در Google Chrome + پشتیبانی از پل سلنیوم و Google Gemini")
     say("=" * 68)
 
     if not os.path.isdir(APP_DIR):
@@ -110,21 +157,26 @@ def main():
     say(f"✅ Node.js پیدا شد: {ver}")
 
     if not deps_ok():
-        install_deps(npm)
+        install_node_deps(npm)
 
     bridge_proc = None
     server_proc = None
 
     try:
-        # اجرای سرور اصلی Node با پیش‌فرض Google Gemini
+        # ۱. اجرای پل سلنیوم در پس‌زمینه
+        if not port_open(BRIDGE_PORT):
+            bridge_proc = start_bridge()
+            time.sleep(1.5)
+
+        # ۲. اجرای سرور اصلی Node
         if not port_open(PORT):
-            say("🚀 در حال راه‌اندازی سرور و موتور هوش مصنوعی...")
+            say("🚀 در حال راه‌اندازی سرور اصلی برنامه...")
             server_proc = start_server(node)
 
             for _ in range(60):
                 if server_proc.poll() is not None:
                     say("⚠️ تلاش مجدد برای اجرای سرور...")
-                    install_deps(npm)
+                    install_node_deps(npm)
                     server_proc = start_server(node)
                     for _ in range(60):
                         if server_proc.poll() is not None:
@@ -142,18 +194,17 @@ def main():
             say(f"ℹ️ سرور اصلی از قبل روی پورت {PORT} فعال است.")
 
         say("\n" + "═" * 68)
-        say(f"  🎉 برنامه با موفقیت اجرا شد!")
-        say(f"  🌐 آدرس دسترسی در مرورگر: http://localhost:{PORT}")
-        say(f"  ⚡ مدل فعال: Google Gemini (gemini-1.5-flash)")
-        say(f"  🧠 پایگاه دانش یادگیری دیتابیس: آماده به کار")
-        say(f"  📊 گزارش‌ساز 8D و تحلیل ۵ چرا: فعال")
-        say(f"  برای تست زنده Gemini: python test_gemini.py")
-        say(f"  برای خروج و خاموش کردن: در این پنجره کلیدهای Ctrl+C را بزنید.")
+        say(f"  🎉 تمام سرویس‌ها با موفقیت بالا آمدند!")
+        say(f"  🌐 آدرس وب: http://localhost:{PORT}")
+        say(f"  🌉 پل مرورگر DeepSeek: http://localhost:{BRIDGE_PORT}/v1 (پورت فعال: {port_open(BRIDGE_PORT)})")
+        say(f"  ⚡ مدل‌های آماده: Google Gemini 1.5 Flash + پل سلنیومی کروم + موتور آفلاین")
+        say(f"  برای خروج و خاموش کردن همه سرویس‌ها: در این پنجره Ctrl+C بزنید.")
         say("═" * 68 + "\n")
 
-        webbrowser.open(URL)
+        # ۳. باز کردن حتمی در Google Chrome
+        open_in_chrome(URL)
 
-        # زنده نگه‌داشتن و مانیتور پردازش‌ها
+        # مانیتور پردازش‌ها
         while True:
             if server_proc and server_proc.poll() is not None:
                 say("⚠️ سرور اصلی متوقف شد.")
