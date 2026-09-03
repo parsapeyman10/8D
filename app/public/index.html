@@ -488,10 +488,30 @@
     <h2>تنظیمات مدل هوش مصنوعی</h2>
     <div class="provider-tabs">
       <label><input type="radio" name="provider" value="bridge" checked /> 🌐 <b>مرورگر کروم و پل وب DeepSeek (پیش‌فرض اصلی سیستم)</b></label>
-      <label><input type="radio" name="provider" value="gemini" /> ⚡ Google Gemini (gemini-1.5-flash)</label>
-      <label><input type="radio" name="provider" value="offline" /> 🔌 موتور هوش مصنوعی آفلاین (بدون اینترنت)</label>
-      <label><input type="radio" name="provider" value="cloud" /> ☁️ سایر سرویس‌های ابری (API Key)</label>
+      <label><input type="radio" name="provider" value="claude" /> 🧠 Anthropic Claude (Claude 3.5 Sonnet / Claude Code)</label>
+      <label><input type="radio" name="provider" value="gemini" /> ⚡ Google Gemini (gemini-1.5-flash — رایگان)</label>
+      <label><input type="radio" name="provider" value="offline" /> 🔌 موتور هوش مصنوعی آفلاین (بدون اینترنت و رایگان)</label>
+      <label><input type="radio" name="provider" value="cloud" /> ☁️ سایر سرویس‌های ابری (DeepSeek Cloud / OpenAI)</label>
       <label><input type="radio" name="provider" value="local" /> 🦙 مدل‌های محلی سیستم (Ollama)</label>
+    </div>
+
+    <!-- Claude Fields -->
+    <div id="claudeFields" style="display:none">
+      <label class="fld">کلید Anthropic Claude API (یا کلیدهای چندگانه جداشده با کاما)
+        <input type="password" id="claudeApiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off" />
+      </label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="fld">نسخه مدل Claude
+          <select id="claudeModelSelect">
+            <option value="claude-3-5-sonnet-20241022" selected>claude-3-5-sonnet (هوشمندترین)</option>
+            <option value="claude-3-5-haiku-20241022">claude-3-5-haiku (پرسرعت)</option>
+            <option value="claude-3-opus-20240229">claude-3-opus</option>
+          </select>
+        </label>
+        <div style="display:flex;align-items:flex-end">
+          <button type="button" id="testClaudeBtn" style="width:100%;padding:9px;background:var(--purple);color:#fff;font-size:12.5px;margin-bottom:10px">⚡ تست اتصال Claude</button>
+        </div>
+      </div>
     </div>
 
     <!-- Bridge Fields (Default) -->

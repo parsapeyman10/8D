@@ -19,6 +19,8 @@ import { lookupDtc, DTC_DATABASE } from './dtc_db.js';
 import { getPinoutData, PINOUTS_DATABASE } from './pinouts_db.js';
 import { runOfflineStep, runOfflineReport } from './offline_engine.js';
 import { callGemini, testGemini } from './gemini.js';
+import { callClaude, testClaude } from './claude.js';
+import { resilientCall, getGatewayStatus } from './provider_gateway.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -30,6 +32,7 @@ const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'bridge';
 const BRIDGE_URL = process.env.BRIDGE_URL || 'http://127.0.0.1:8765/v1';
 const ENV_GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const ENV_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
+const ENV_CLAUDE_KEY = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
 const DEFAULT_MAX_QUESTIONS = 8;
 
 // Initialize Learning Database
@@ -365,21 +368,32 @@ async function nextStep(cfg, state) {
   if (cfg.provider === 'offline' || cfg.offline) {
     return runOfflineStep(state);
   }
-  if (cfg.demo) return demoNextStep(state);
 
   try {
-    console.log(`[Tier 1] ارسال سوال به مدل هوش مصنوعی (${cfg.provider})...`);
-    const parsed = await callJson({
-      cfg,
-      model: cfg.chatModel,
+    const { result, provider, model } = await resilientCall({
+      preferredProvider: cfg.provider || 'bridge',
       system: TIER1_QUESTION_SELECTOR,
       user: JSON.stringify(caseStateForModel(state)),
       temperature: 0.1,
+      maxTokens: 3500,
+      state,
+      customConfig: {
+        claudeKey: cfg.claudeKey,
+        claudeModel: cfg.claudeModel,
+        claudeBaseUrl: cfg.claudeBaseUrl,
+        geminiKey: cfg.apiKey,
+        geminiModel: cfg.chatModel,
+        geminiBaseUrl: cfg.baseUrl,
+        bridgeUrl: cfg.baseUrl,
+      },
     });
 
-    if (parsed) return parsed;
+    if (result) {
+      console.log(`[Tier 1] پاسخ سوال با موفقیت از مدل ${provider} (${model}) دریافت شد.`);
+      return result;
+    }
   } catch (err) {
-    console.warn(`⚠️ خطا در دریافت از مدل (${cfg.provider}): ${err.message}. استفاده از موتور آفلاین.`);
+    console.warn(`⚠️ خطا در دریافت پاسخ از هوش مصنوعی: ${err.message}. سوییچ خودکار به موتور آفلاین.`);
     return runOfflineStep(state);
   }
 
@@ -391,21 +405,32 @@ async function finalReport(cfg, state) {
   if (cfg.provider === 'offline' || cfg.offline) {
     return runOfflineReport(state);
   }
-  if (cfg.demo) return demoFinalReport(state);
 
   try {
-    console.log(`[Tier 2] دریافت گزارش تحلیلی و 8D از مدل هوش مصنوعی (${cfg.provider})...`);
-    const parsed = await callJson({
-      cfg,
-      model: cfg.reasonerModel,
+    const { result, provider, model } = await resilientCall({
+      preferredProvider: cfg.provider || 'bridge',
       system: TIER2_ANALYZER,
       user: JSON.stringify(caseStateForModel(state)),
       temperature: 0.1,
       maxTokens: 4000,
+      state: { ...state, phase: 'concluding' },
+      customConfig: {
+        claudeKey: cfg.claudeKey,
+        claudeModel: cfg.claudeModel,
+        claudeBaseUrl: cfg.claudeBaseUrl,
+        geminiKey: cfg.apiKey,
+        geminiModel: cfg.chatModel,
+        geminiBaseUrl: cfg.baseUrl,
+        bridgeUrl: cfg.baseUrl,
+      },
     });
-    if (parsed && Array.isArray(parsed.root_causes)) return parsed;
+
+    if (result && Array.isArray(result.root_causes)) {
+      console.log(`[Tier 2] گزارش نهایی 8D با موفقیت از مدل ${provider} (${model}) دریافت گردید.`);
+      return result;
+    }
   } catch (err) {
-    console.warn(`⚠️ خطا در دریافت گزارش از مدل (${cfg.provider}): ${err.message}. استفاده از موتور آفلاین.`);
+    console.warn(`⚠️ خطا در دریافت گزارش نهایی: ${err.message}. صدور گزارش از طریق موتور آفلاین.`);
     return runOfflineReport(state);
   }
 
@@ -434,11 +459,28 @@ function getApiKey(req) {
 function getLlmConfig(req) {
   const provider = (req.headers['x-provider'] || '').toString().trim() || DEFAULT_PROVIDER;
   const apiKey = getApiKey(req);
+  const claudeKey = (req.headers['x-claude-key'] || '').toString().trim() || ENV_CLAUDE_KEY;
+  const claudeModel = (req.headers['x-claude-model'] || '').toString().trim() || 'claude-3-5-sonnet-20241022';
   const headerBase = (req.headers['x-base-url'] || '').toString().trim();
   const chatModel = (req.headers['x-chat-model'] || '').toString().trim();
   const reasonerModel = (req.headers['x-reasoner-model'] || '').toString().trim();
 
-  // 1. DeepSeek Selenium Chrome Bridge (Default)
+  // 1. Anthropic Claude (Claude Code / 3.5 Sonnet)
+  if (provider === 'claude') {
+    return {
+      provider: 'claude',
+      claudeKey: claudeKey || apiKey || ENV_CLAUDE_KEY,
+      claudeModel: claudeModel || chatModel || 'claude-3-5-sonnet-20241022',
+      claudeBaseUrl: headerBase || 'https://api.anthropic.com/v1',
+      chatModel: claudeModel,
+      reasonerModel: claudeModel,
+      demo: false,
+      offline: false,
+      needsKey: true,
+    };
+  }
+
+  // 2. DeepSeek Selenium Chrome Bridge (Default)
   if (provider === 'bridge') {
     return {
       provider: 'bridge',
@@ -446,13 +488,15 @@ function getLlmConfig(req) {
       baseUrl: headerBase || BRIDGE_URL,
       chatModel: chatModel || 'deepseek-web-chrome',
       reasonerModel: reasonerModel || chatModel || 'deepseek-web-chrome',
+      claudeKey,
+      claudeModel,
       demo: false,
       offline: false,
       needsKey: false,
     };
   }
 
-  // 2. Google Gemini
+  // 3. Google Gemini
   if (provider === 'gemini') {
     return {
       provider: 'gemini',
@@ -460,6 +504,8 @@ function getLlmConfig(req) {
       baseUrl: headerBase || 'https://generativelanguage.googleapis.com/v1beta',
       chatModel: chatModel || 'gemini-1.5-flash',
       reasonerModel: reasonerModel || chatModel || 'gemini-1.5-flash',
+      claudeKey,
+      claudeModel,
       demo: false,
       offline: false,
       needsKey: true,
@@ -485,6 +531,8 @@ function getLlmConfig(req) {
     baseUrl,
     chatModel: chatModel || 'deepseek-chat',
     reasonerModel: reasonerModel || chatModel || 'deepseek-reasoner',
+    claudeKey,
+    claudeModel,
     demo: false,
     offline: false,
     needsKey: provider === 'cloud' || provider === 'custom',
@@ -528,6 +576,26 @@ app.post('/api/gemini/test', async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message || 'خطا در برقراری ارتباط با Google Gemini' });
   }
+});
+
+// One-Click Claude Live Connection Test
+app.post('/api/claude/test', async (req, res) => {
+  try {
+    const apiKey = (req.body?.apiKey || '').toString().trim() || ENV_CLAUDE_KEY;
+    const model = (req.body?.model || '').toString().trim() || 'claude-3-5-sonnet-20241022';
+    if (!apiKey) {
+      return res.status(400).json({ ok: false, error: 'لطفاً ابتدا کلید Claude / Anthropic API را وارد کنید.' });
+    }
+    const result = await testClaude(apiKey, model);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || 'خطا در برقراری ارتباط با Claude' });
+  }
+});
+
+// Gateway Status
+app.get('/api/gateway/status', (req, res) => {
+  res.json(getGatewayStatus());
 });
 
 app.get('/api/bom', (req, res) => {

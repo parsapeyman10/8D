@@ -5,6 +5,7 @@ const els = {
   keyDot: $('keyDot'), keyText: $('keyText'),
   settingsBtn: $('settingsBtn'), settingsModal: $('settingsModal'),
   testBridgeBtn: $('testBridgeBtn'), bridgeNotice: $('bridgeNotice'),
+  claudeApiKeyInput: $('claudeApiKeyInput'), claudeModelSelect: $('claudeModelSelect'), testClaudeBtn: $('testClaudeBtn'),
   geminiApiKeyInput: $('geminiApiKeyInput'), geminiModelSelect: $('geminiModelSelect'),
   apiKeyInput: $('apiKeyInput'), saveKeyBtn: $('saveKeyBtn'), clearKeyBtn: $('clearKeyBtn'), closeModalBtn: $('closeModalBtn'),
   errorBanner: $('errorBanner'),
@@ -136,6 +137,8 @@ function getConfig() {
     return {
       provider: c.provider || 'bridge', // Default is DeepSeek Chrome Bridge
       bridgeUrl: c.bridgeUrl || 'http://localhost:8765/v1',
+      claudeApiKey: c.claudeApiKey || localStorage.getItem('claude_api_key') || '',
+      claudeModel: c.claudeModel || 'claude-3-5-sonnet-20241022',
       geminiApiKey: c.geminiApiKey || localStorage.getItem('gemini_api_key') || '',
       geminiModel: c.geminiModel || 'gemini-1.5-flash',
       apiKey: c.apiKey || '',
@@ -148,6 +151,8 @@ function getConfig() {
     return {
       provider: 'bridge',
       bridgeUrl: 'http://localhost:8765/v1',
+      claudeApiKey: '',
+      claudeModel: 'claude-3-5-sonnet-20241022',
       geminiApiKey: '',
       geminiModel: 'gemini-1.5-flash',
       apiKey: '',
@@ -161,12 +166,14 @@ function getConfig() {
 function saveConfig(c) {
   localStorage.setItem('llm_config', JSON.stringify(c));
   if (c.geminiApiKey) localStorage.setItem('gemini_api_key', c.geminiApiKey);
+  if (c.claudeApiKey) localStorage.setItem('claude_api_key', c.claudeApiKey);
 }
 
 function configReady() {
   const c = getConfig();
   if (c.provider === 'bridge' || c.provider === 'offline' || c.provider === 'local') return true;
   if (c.provider === 'gemini') return true;
+  if (c.provider === 'claude') return Boolean(c.claudeApiKey) || serverHasKey;
   return Boolean(c.apiKey) || serverHasKey;
 }
 
@@ -176,6 +183,7 @@ function refreshKeyStatus() {
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
     c.provider === 'bridge' ? 'کروم DeepSeek 🌐'
+    : c.provider === 'claude' ? 'Claude 3.5 🧠'
     : c.provider === 'gemini' ? 'Gemini ⚡'
     : c.provider === 'offline' ? 'موتور آفلاین 🔌'
     : c.provider === 'local' ? 'مدل محلی 🦙'
@@ -210,6 +218,7 @@ setInterval(checkLoginStatus, 5000);
 checkLoginStatus();
 
 const providerRadios = () => [...document.querySelectorAll('input[name="provider"]')];
+const claudeFields = document.getElementById('claudeFields');
 const bridgeFields = document.getElementById('bridgeFields');
 const geminiFields = document.getElementById('geminiFields');
 const offlineFields = document.getElementById('offlineFields');
@@ -224,6 +233,7 @@ const cloudChatModelInput = document.getElementById('cloudChatModelInput');
 function syncProviderFields() {
   const p = providerRadios().find(r => r.checked)?.value || 'bridge';
   if (bridgeFields) bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
+  if (claudeFields) claudeFields.style.display = p === 'claude' ? 'block' : 'none';
   if (geminiFields) geminiFields.style.display = p === 'gemini' ? 'block' : 'none';
   if (offlineFields) offlineFields.style.display = p === 'offline' ? 'block' : 'none';
   if (cloudFields) cloudFields.style.display = p === 'cloud' ? 'block' : 'none';
@@ -235,6 +245,8 @@ els.settingsBtn.onclick = () => {
   const c = getConfig();
   providerRadios().forEach(r => r.checked = (r.value === c.provider));
   if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || 'http://localhost:8765/v1';
+  if (els.claudeApiKeyInput) els.claudeApiKeyInput.value = c.claudeApiKey || '';
+  if (els.claudeModelSelect) els.claudeModelSelect.value = c.claudeModel || 'claude-3-5-sonnet-20241022';
   if (els.geminiApiKeyInput) els.geminiApiKeyInput.value = c.geminiApiKey || '';
   if (els.geminiModelSelect) els.geminiModelSelect.value = c.geminiModel || 'gemini-1.5-flash';
   if (els.apiKeyInput) els.apiKeyInput.value = c.apiKey || '';
@@ -252,6 +264,8 @@ els.saveKeyBtn.onclick = () => {
   saveConfig({
     provider,
     bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : 'http://localhost:8765/v1',
+    claudeApiKey: els.claudeApiKeyInput ? els.claudeApiKeyInput.value.trim() : '',
+    claudeModel: els.claudeModelSelect ? els.claudeModelSelect.value : 'claude-3-5-sonnet-20241022',
     geminiApiKey: els.geminiApiKeyInput ? els.geminiApiKeyInput.value.trim() : '',
     geminiModel: els.geminiModelSelect ? els.geminiModelSelect.value : 'gemini-1.5-flash',
     apiKey: els.apiKeyInput ? els.apiKeyInput.value.trim() : '',
@@ -263,6 +277,32 @@ els.saveKeyBtn.onclick = () => {
   els.settingsModal.classList.remove('show');
   refreshKeyStatus();
 };
+
+if (els.testClaudeBtn) {
+  els.testClaudeBtn.onclick = async () => {
+    const key = els.claudeApiKeyInput ? els.claudeApiKeyInput.value.trim() : '';
+    const model = els.claudeModelSelect ? els.claudeModelSelect.value : 'claude-3-5-sonnet-20241022';
+    if (!key) { alert('لطفاً ابتدا کلید Claude API را وارد کنید.'); return; }
+    els.testClaudeBtn.textContent = '⏳ در حال تست...';
+    try {
+      const res = await fetch('/api/claude/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: key, model }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert('🎉 اتصال به Anthropic Claude موفقیت‌آمیز بود!');
+      } else {
+        alert('❌ خطا در اتصال به Claude: ' + data.error);
+      }
+    } catch (e) {
+      alert('خطا در اتصال: ' + e.message);
+    } finally {
+      els.testClaudeBtn.textContent = '⚡ تست اتصال Claude';
+    }
+  };
+}
 
 els.clearKeyBtn.onclick = () => {
   saveConfig({ provider: 'bridge', bridgeUrl: 'http://localhost:8765/v1' });
@@ -310,6 +350,10 @@ async function api(path, body) {
   if (c.provider === 'bridge') {
     headers['x-provider'] = 'bridge';
     headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
+  } else if (c.provider === 'claude') {
+    headers['x-provider'] = 'claude';
+    if (c.claudeApiKey) headers['x-claude-key'] = c.claudeApiKey;
+    if (c.claudeModel) headers['x-claude-model'] = c.claudeModel;
   } else if (c.provider === 'gemini') {
     headers['x-provider'] = 'gemini';
     if (c.geminiApiKey) headers['x-gemini-key'] = c.geminiApiKey;
