@@ -1,4 +1,4 @@
-// Guided Diagnostic Assistant — frontend with Learning Database
+// Guided Diagnostic Assistant — Advanced Frontend with 8D Quality Engine & Learning Database
 const $ = (id) => document.getElementById(id);
 
 const els = {
@@ -6,7 +6,8 @@ const els = {
   settingsBtn: $('settingsBtn'), settingsModal: $('settingsModal'),
   apiKeyInput: $('apiKeyInput'), saveKeyBtn: $('saveKeyBtn'), clearKeyBtn: $('clearKeyBtn'), closeModalBtn: $('closeModalBtn'),
   errorBanner: $('errorBanner'),
-  startCard: $('startCard'), symptomInput: $('symptomInput'), startBtn: $('startBtn'), useBomCheckbox: $('useBomCheckbox'),
+  startCard: $('startCard'), symptomInput: $('symptomInput'), dtcInput: $('dtcInput'), dtcList: $('dtcList'),
+  startBtn: $('startBtn'), useBomCheckbox: $('useBomCheckbox'), micBtn: $('micBtn'),
   questionCard: $('questionCard'), qCounter: $('qCounter'), progressFill: $('progressFill'),
   systemTag: $('systemTag'), questionText: $('questionText'), optionsBox: $('optionsBox'),
   freetextBox: $('freetextBox'), freetextInput: $('freetextInput'), freetextSubmit: $('freetextSubmit'), freetextCancel: $('freetextCancel'),
@@ -14,6 +15,7 @@ const els = {
   qLoading: $('qLoading'),
   escalationCard: $('escalationCard'), escTitle: $('escTitle'), escReason: $('escReason'), escAction: $('escAction'), escDoNot: $('escDoNot'), escNewCase: $('escNewCase'),
   reportCard: $('reportCard'), reportSymptom: $('reportSymptom'), rootCauses: $('rootCauses'),
+  whysTree: $('whysTree'), eightDGrid: $('eightDGrid'), printReportBtn: $('printReportBtn'), copyReportBtn: $('copyReportBtn'),
   conflictsList: $('conflictsList'), actionsList: $('actionsList'), escalateIfList: $('escalateIfList'),
   confirmResultCheckbox: $('confirmResultCheckbox'), feedbackNotesInput: $('feedbackNotesInput'),
   saveFeedbackBtn: $('saveFeedbackBtn'), feedbackSavedMsg: $('feedbackSavedMsg'),
@@ -21,23 +23,29 @@ const els = {
   mainLoading: $('mainLoading'), mainLoadingText: $('mainLoadingText'),
   hypoBox: $('hypoBox'), learnedMemoryBox: $('learnedMemoryBox'), ruledBox: $('ruledBox'), bomBox: $('bomBox'),
   // Tabs
-  tabDiagnosisBtn: $('tabDiagnosisBtn'), tabPartBtn: $('tabPartBtn'), tabKnowledgeBtn: $('tabKnowledgeBtn'),
-  tabDiagnosis: $('tabDiagnosis'), tabPart: $('tabPart'), tabKnowledge: $('tabKnowledge'),
+  tabDiagnosisBtn: $('tabDiagnosisBtn'), tabPartBtn: $('tabPartBtn'), tabPinoutsBtn: $('tabPinoutsBtn'), tabKnowledgeBtn: $('tabKnowledgeBtn'),
+  tabDiagnosis: $('tabDiagnosis'), tabPart: $('tabPart'), tabPinouts: $('tabPinouts'), tabKnowledge: $('tabKnowledge'),
+  // Pinouts
+  pinoutsContainer: $('pinoutsContainer'),
+  // BOM upload
+  uploadBomBtn: $('uploadBomBtn'), bomFileInput: $('bomFileInput'),
   // Knowledge
   statTotalCases: $('statTotalCases'), statConfirmedCases: $('statConfirmedCases'), statUserKnowledge: $('statUserKnowledge'),
   kTitleInput: $('kTitleInput'), kSymptomInput: $('kSymptomInput'), kPartCodeInput: $('kPartCodeInput'),
   kRootCauseInput: $('kRootCauseInput'), kSolutionInput: $('kSolutionInput'), addKnowledgeBtn: $('addKnowledgeBtn'),
   userKnowledgeList: $('userKnowledgeList'), recentCasesList: $('recentCasesList'),
+  exportDbBtn: $('exportDbBtn'), importDbBtn: $('importDbBtn'), importDbInput: $('importDbInput'),
 };
 
 let sessionId = null;
 let serverHasKey = false;
 let pendingFallbackOption = null;
+let lastReportData = null;
 
 // ---------- TAB SWITCHING ----------
 function switchTab(tabId) {
-  [els.tabDiagnosis, els.tabPart, els.tabKnowledge].forEach(t => t.classList.remove('active'));
-  [els.tabDiagnosisBtn, els.tabPartBtn, els.tabKnowledgeBtn].forEach(b => b.classList.remove('active'));
+  [els.tabDiagnosis, els.tabPart, els.tabPinouts, els.tabKnowledge].forEach(t => t && t.classList.remove('active'));
+  [els.tabDiagnosisBtn, els.tabPartBtn, els.tabPinoutsBtn, els.tabKnowledgeBtn].forEach(b => b && b.classList.remove('active'));
 
   if (tabId === 'diagnosis') {
     els.tabDiagnosis.classList.add('active');
@@ -45,6 +53,10 @@ function switchTab(tabId) {
   } else if (tabId === 'part') {
     els.tabPart.classList.add('active');
     els.tabPartBtn.classList.add('active');
+  } else if (tabId === 'pinouts') {
+    els.tabPinouts.classList.add('active');
+    els.tabPinoutsBtn.classList.add('active');
+    loadPinoutsData();
   } else if (tabId === 'knowledge') {
     els.tabKnowledge.classList.add('active');
     els.tabKnowledgeBtn.classList.add('active');
@@ -54,9 +66,68 @@ function switchTab(tabId) {
 
 els.tabDiagnosisBtn.onclick = () => switchTab('diagnosis');
 els.tabPartBtn.onclick = () => switchTab('part');
+els.tabPinoutsBtn.onclick = () => switchTab('pinouts');
 els.tabKnowledgeBtn.onclick = () => switchTab('knowledge');
 
-// ---------- model config handling ----------
+// ---------- SPEECH RECOGNITION (Voice Input) ----------
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRec();
+  recognition.lang = 'fa-IR';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    els.micBtn.classList.add('listening');
+    els.micBtn.textContent = '🔴 در حال شنیدن...';
+  };
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    els.symptomInput.value = (els.symptomInput.value ? els.symptomInput.value + ' ' : '') + text;
+  };
+  recognition.onend = () => {
+    els.micBtn.classList.remove('listening');
+    els.micBtn.textContent = '🎤 ورودی صوتی';
+  };
+  recognition.onerror = () => {
+    els.micBtn.classList.remove('listening');
+    els.micBtn.textContent = '🎤 ورودی صوتی';
+  };
+  els.micBtn.onclick = () => {
+    try { recognition.start(); } catch { recognition.stop(); }
+  };
+} else {
+  els.micBtn.style.display = 'none';
+}
+
+// Load DTC list for quick suggestion
+fetch('/api/dtc/list').then(r => r.json()).then(codes => {
+  els.dtcList.innerHTML = codes.map(c => `<option value="${c.code}">${c.code} — ${c.desc_fa}</option>`).join('');
+}).catch(() => {});
+
+// ---------- BOM UPLOAD ----------
+els.uploadBomBtn.onclick = () => els.bomFileInput.click();
+els.bomFileInput.onchange = async () => {
+  const file = els.bomFileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const base64 = e.target.result.split(',')[1];
+    setLoading(true, 'در حال پردازش و بارگذاری فایل BOM...');
+    try {
+      const res = await api('/api/bom/upload', { base64, filename: file.name });
+      alert(`✅ فایل BOM با موفقیت بارگذاری شد!\nتعداد قطعات: ${res.count}\nنام محصول: ${res.product || file.name}`);
+      location.reload();
+    } catch (err) {
+      showError('خطا در بارگذاری فایل BOM: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  reader.readAsDataURL(file);
+};
+
+// ---------- MODEL CONFIG HANDLING ----------
 function getConfig() {
   try {
     const c = JSON.parse(localStorage.getItem('llm_config') || '{}');
@@ -75,7 +146,6 @@ function getConfig() {
   } catch { return { provider: 'cloud', apiKey: '', baseUrl: '', bridgeUrl: '', chatModel: '', reasonerModel: '', cloudPreset: 'deepseek', cloudBaseUrl: '', cloudChatModel: '', cloudReasonerModel: '' }; }
 }
 function saveConfig(c) { localStorage.setItem('llm_config', JSON.stringify(c)); }
-function getKey() { return getConfig().apiKey; }
 
 function configReady() {
   const c = getConfig();
@@ -90,11 +160,11 @@ function refreshKeyStatus() {
   const presetNames = { deepseek: 'DeepSeek', openrouter: 'OpenRouter', groq: 'Groq', gemini: 'Gemini', openai: 'OpenAI', xai: 'xAI', mistral: 'Mistral', together: 'Together', avalai: 'AvalAI', gapgpt: 'GapGPT', custom: 'سفارشی' };
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
-    c.provider === 'demo' ? 'حالت دمو فعال است'
-    : c.provider === 'bridge' ? 'مرورگر کروم (پل سلنیومی)'
-    : c.provider === 'local' ? ('مدل لوکال: ' + (c.baseUrl || 'http://localhost:11434/v1'))
-    : ok ? ((presetNames[c.cloudPreset] || 'ابری') + (c.apiKey ? ' (کلید مرورگر)' : ' (کلید سرور)'))
-    : 'کلید API تنظیم نشده';
+    c.provider === 'demo' ? 'حالت دمو'
+    : c.provider === 'bridge' ? 'پل سلنیومی'
+    : c.provider === 'local' ? 'مدل لوکال'
+    : ok ? (presetNames[c.cloudPreset] || 'ابری')
+    : 'تنظیم نشده';
 }
 
 fetch('/api/health').then(r => r.json()).then(d => {
@@ -195,7 +265,7 @@ els.clearKeyBtn.onclick = () => {
 };
 els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) els.settingsModal.classList.remove('show'); };
 
-// ---------- helpers ----------
+// ---------- HELPERS ----------
 function showError(msg) {
   els.errorBanner.textContent = msg;
   els.errorBanner.classList.add('show');
@@ -204,10 +274,10 @@ function hideError() { els.errorBanner.classList.remove('show'); }
 
 function errorMessage(err, status) {
   if (status === 401 && err?.error === 'missing_api_key')
-    return 'کلید API تنظیم نشده است. از دکمه «⚙️ تنظیمات مدل» بالای صفحه کلید را وارد کنید یا گزینه لوکال/پل را انتخاب کنید.';
-  if (status === 401) return 'کلید API نامعتبر است. لطفاً تنظیمات را بررسی کنید.';
+    return 'کلید API تنظیم نشده است. از دکمه «⚙️ تنظیمات» بالای صفحه یک سرویس را انتخاب کنید.';
+  if (status === 401) return 'کلید API نامعتبر است.';
   if (status === 402) return 'اعتبار حساب مدل کافی نیست.';
-  if (status === 502) return 'اتصال به مدل برقرار نشد. شبکه یا سرور لوکال را بررسی کنید.';
+  if (status === 502) return 'اتصال به مدل برقرار نشد.';
   return 'خطا در ارتباط با سرور: ' + (err?.detail || err?.error || status || 'نامشخص');
 }
 
@@ -247,7 +317,7 @@ async function api(path, body) {
 function faDigits(n) { return String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]); }
 
 const SYSTEM_FA = {
-  engine: 'موتور', electrical: 'برق و الکترونیک', transmission: 'گیربکس', 'chassis/steering': 'شاسی و فرمان',
+  engine: 'موتور', electrical: 'برق و مدارات الکترونیک', transmission: 'گیربکس', 'chassis/steering': 'شاسی و فرمان',
   brakes: 'ترمز', fuel: 'سوخت', HVAC: 'تهویه', body: 'بدنه', 'SRS/airbag': 'ایربگ',
   infotainment: 'مالتی‌مدیا', other: 'سایر مدارات',
 };
@@ -260,7 +330,7 @@ function setLoading(on, text) {
   els.mainLoading.classList.toggle('hidden', !on);
 }
 
-// ---------- sidebar ----------
+// ---------- SIDEBAR ----------
 function renderSidebar(state) {
   if (!state) return;
   const hy = state.leading_hypotheses || [];
@@ -278,7 +348,6 @@ function renderSidebar(state) {
     els.hypoBox.innerHTML = '<p class="hint" style="margin:0">هنوز فرضیه‌ای ثبت نشده است.</p>';
   }
 
-  // Learned Memory in sidebar
   const mem = state.learned_memory || [];
   if (mem.length) {
     els.learnedMemoryBox.innerHTML = mem.map(m => `
@@ -288,7 +357,7 @@ function renderSidebar(state) {
       </div>
     `).join('');
   } else {
-    els.learnedMemoryBox.innerHTML = '<p class="hint" style="margin:0">مورد مشابهی در حافظه گذشته یافت نشد (عیب‌یابی آزاد/مستقل).</p>';
+    els.learnedMemoryBox.innerHTML = '<p class="hint" style="margin:0">مورد مشابهی در حافظه گذشته ثبت نشده است.</p>';
   }
 
   const ruled = state.ruled_out || [];
@@ -322,7 +391,7 @@ function renderQuestion(data) {
   pendingFallbackOption = null;
 
   const n = data.questionNumber, max = data.maxQuestions || 8;
-  els.qCounter.textContent = `سوال ${faDigits(n)} از ${faDigits(max)} (امکان پرسیدن سوالات بیشتر وجود دارد)`;
+  els.qCounter.textContent = `سوال ${faDigits(n)} از ${faDigits(max)} (امکان پرسش بیشتر وجود دارد)`;
   els.progressFill.style.width = `${Math.min(100, ((n - 1) / max) * 100)}%`;
 
   const sys = data.state?.system;
@@ -366,10 +435,12 @@ function renderEscalation(data) {
 function renderReport(data) {
   hide(els.startCard, els.questionCard, els.escalationCard);
   show(els.reportCard);
+  lastReportData = data;
   const rep = data.report || {};
   els.reportSymptom.textContent = 'علامت گزارش‌شده: ' + (data.state?.symptom || '');
   els.feedbackSavedMsg.style.display = 'none';
 
+  // Root causes
   els.rootCauses.innerHTML = (rep.root_causes || []).map((rc, i) => `
     <div class="rc">
       <div class="head">
@@ -378,6 +449,31 @@ function renderReport(data) {
       </div>
       ${rc.evidence ? `<div class="evidence">🔎 ${esc(rc.evidence)}</div>` : ''}
     </div>`).join('') || '<p class="hint">علتی ثبت نشد.</p>';
+
+  // 5-Whys Tree
+  const whys = rep.five_whys || [];
+  if (whys.length) {
+    els.whysTree.innerHTML = whys.map((w, idx) => `
+      <div class="why-node">
+        <b>گام ${faDigits(idx + 1)}:</b> ${esc(w)}
+      </div>
+    `).join('');
+  } else {
+    els.whysTree.innerHTML = '<p class="hint">زنجیره ۵ چرا ثبت نشد.</p>';
+  }
+
+  // 8D Report Grid
+  const d = rep.eight_d_report || {};
+  els.eightDGrid.innerHTML = `
+    <div class="eight-d-item"><b>D1. تیم حل مسئله (Team):</b> ${esc(d.d1_team || '-')}</div>
+    <div class="eight-d-item"><b>D2. توصیف دقیق عیب (Problem Description 5W2H):</b> ${esc(d.d2_problem || '-')}</div>
+    <div class="eight-d-item"><b>D3. اقدامات مهار موقت (Containment Actions):</b> ${esc(d.d3_containment || '-')}</div>
+    <div class="eight-d-item"><b>D4. علت ریشه‌ای قطعی (Root Cause):</b> ${esc(d.d4_root_cause || '-')}</div>
+    <div class="eight-d-item"><b>D5. اقدامات اصلاحی دائم (Corrective Actions PCA):</b> ${esc(d.d5_corrective_actions || '-')}</div>
+    <div class="eight-d-item"><b>D6. صحه‌گذاری اصلاحات (Verification):</b> ${esc(d.d6_verification || '-')}</div>
+    <div class="eight-d-item"><b>D7. اقدامات پیشگیرانه از تکرار (Recurrence Prevention):</b> ${esc(d.d7_prevention || '-')}</div>
+    <div class="eight-d-item"><b>D8. تایید نهایی و بستن پرونده (Closure):</b> ${esc(d.d8_closure || '-')}</div>
+  `;
 
   const conflicts = rep.unresolved_conflicts || [];
   els.conflictsList.innerHTML = conflicts.length ? conflicts.map(c => `<li>${esc(c)}</li>`).join('') : '<li>ندارد</li>';
@@ -399,12 +495,35 @@ function handleResponse(data) {
   showError('پاسخ نامشخص از سرور دریافت شد.');
 }
 
-// ---------- actions ----------
+// Print 8D Report
+els.printReportBtn.onclick = () => window.print();
+
+// Copy 8D Report Text
+els.copyReportBtn.onclick = () => {
+  if (!lastReportData?.report?.eight_d_report) return;
+  const d = lastReportData.report.eight_d_report;
+  const text = `=======================================================
+  گزارش حل مسئله ۸ مرحله‌ای (8D Quality Report)
+=======================================================
+D1. تیم حل مسئله: ${d.d1_team}
+D2. شرح عیب (5W2H): ${d.d2_problem}
+D3. اقدامات مهار موقت: ${d.d3_containment}
+D4. علت ریشه‌ای: ${d.d4_root_cause}
+D5. اقدامات اصلاحی دائم: ${d.d5_corrective_actions}
+D6. صحه‌گذاری و تست: ${d.d6_verification}
+D7. پیشگیری از تکرار: ${d.d7_prevention}
+D8. تایید و بستن پرونده: ${d.d8_closure}
+=======================================================`;
+  navigator.clipboard.writeText(text).then(() => alert('گزارش 8D با موفقیت در کلیپ‌بورد کپی شد!'));
+};
+
+// ---------- ACTIONS ----------
 async function startSession() {
   const symptom = els.symptomInput.value.trim();
-  if (!symptom) { showError('لطفاً ابتدا علامت یا مشکل را بنویسید.'); return; }
+  const dtc = els.dtcInput ? els.dtcInput.value.trim() : '';
+  if (!symptom && !dtc) { showError('لطفاً ابتدا علامت یا کد خطای دیاگ (DTC) را وارد کنید.'); return; }
   if (!configReady()) {
-    showError('لطفاً ابتدا از دکمه «⚙️ تنظیمات مدل» یک سرویس را انتخاب کنید.');
+    showError('لطفاً ابتدا از دکمه «⚙️ تنظیمات» یک مدل را انتخاب کنید.');
     els.settingsModal.classList.add('show');
     return;
   }
@@ -413,7 +532,7 @@ async function startSession() {
   setLoading(true, 'در حال جستجو در دیتابیس یادگیری و آماده‌سازی اولین سوال...');
   try {
     const use_bom = Boolean(els.useBomCheckbox.checked);
-    const data = await api('/api/session/start', { symptom, use_bom, max_questions: 8 });
+    const data = await api('/api/session/start', { symptom, dtc, use_bom, max_questions: 8 });
     handleResponse(data);
   } catch (e) {
     showError(e.message);
@@ -440,7 +559,6 @@ async function submitAnswer(answer, freeText) {
   }
 }
 
-// Extend questions (+4 more questions)
 async function extendQuestions() {
   if (!sessionId) return;
   hideError();
@@ -455,7 +573,6 @@ async function extendQuestions() {
   }
 }
 
-// Conclude early
 async function concludeEarly() {
   if (!sessionId) return;
   hideError();
@@ -470,7 +587,6 @@ async function concludeEarly() {
   }
 }
 
-// Save feedback to Database
 async function saveFeedback() {
   if (!sessionId) return;
   const user_confirmed = els.confirmResultCheckbox.checked;
@@ -489,12 +605,14 @@ async function saveFeedback() {
 
 function resetToStart() {
   sessionId = null;
+  lastReportData = null;
   hideError();
   hide(els.questionCard, els.escalationCard, els.reportCard);
   show(els.startCard);
   els.symptomInput.value = '';
+  if (els.dtcInput) els.dtcInput.value = '';
   els.hypoBox.innerHTML = '<p class="hint" style="margin:0">پس از شروع عیب‌یابی، فرضیه‌ها اینجا نمایش داده می‌شوند.</p>';
-  els.learnedMemoryBox.innerHTML = '<p class="hint" style="margin:0">تجربیات بازیابی‌شده از دیتابیس برای این مورد نمایش داده می‌شوند.</p>';
+  els.learnedMemoryBox.innerHTML = '<p class="hint" style="margin:0">تجربیات بازیابی‌شده نمایش داده می‌شوند.</p>';
   els.ruledBox.innerHTML = '<li>—</li>';
   els.bomBox.innerHTML = '<li>پس از تشخیص سیستم، قطعات BOM مرتبط اینجا نمایش داده می‌شوند.</li>';
 }
@@ -519,7 +637,7 @@ document.querySelectorAll('.examples button').forEach(b => {
   b.onclick = () => { els.symptomInput.value = b.dataset.ex; els.symptomInput.focus(); };
 });
 
-// ---------- Part Analysis ----------
+// ---------- PART ANALYSIS ----------
 const partNameInput = $('partNameInput'), partNoInput = $('partNoInput'), partUseBomCheckbox = $('partUseBomCheckbox');
 const partAnalyzeBtn = $('partAnalyzeBtn'), issuesRefreshBtn = $('issuesRefreshBtn');
 const partLoading = $('partLoading'), partResult = $('partResult');
@@ -553,12 +671,17 @@ async function analyzePart() {
       html += `<div class="rc"><div class="cause">✅ تطبیق با BOM: ${esc(d.bom_match.part_name_en || d.bom_match.part_name_fa)}</div>
         <div class="evidence" dir="ltr" style="text-align:left">Part No: ${esc(d.bom_match.part_no || '-')} | Stock: ${esc(d.bom_match.part_code)}${d.bom_match.qty ? ' | QTY: ' + esc(d.bom_match.qty) : ''}${d.bom_match.size ? ' | ' + esc(d.bom_match.size) : ''}</div>
         ${d.bom_match.designator ? `<div class="evidence" dir="ltr" style="text-align:left">Refs: ${esc(d.bom_match.designator)}</div>` : ''}</div>`;
-    } else {
-      html += `<div class="rc"><div class="cause">ℹ️ تحلیل بر اساس پایگاه دانش عمومی قطعات الکترونیک / مکانیک</div></div>`;
+    }
+
+    if (d.pinout) {
+      html += `<div style="background:var(--panel-2);border:1px solid var(--accent);border-radius:10px;padding:12px;margin:12px 0">
+        <h4 style="margin:0 0 6px;color:var(--accent)">📐 نقشه تست پایه‌ها (${esc(d.pinout.package)}):</h4>
+        <div style="font-size:12.5px;line-height:1.8">${esc(d.pinout.test_procedure_fa)}</div>
+      </div>`;
     }
 
     if (d.learned_memory?.length) {
-      html += `<h3 style="color:var(--purple);font-size:14.5px;margin:14px 0 6px">🧠 حافظه دیتابیس یادگیری: تجربیات مشابه ثبت‌شده</h3><ul style="padding-right:18px;line-height:2;font-size:13.5px">`;
+      html += `<h3 style="color:var(--purple);font-size:14px;margin:14px 0 6px">🧠 حافظه دیتابیس یادگیری: تجربیات مشابه</h3><ul style="padding-right:18px;line-height:2;font-size:13px">`;
       for (const m of d.learned_memory) {
         html += `<li><b>${esc(m.title)}</b>: علت تاییدشده: ${esc(m.learned_root_cause)} | راهکار: ${esc(m.learned_solution)}</li>`;
       }
@@ -567,7 +690,7 @@ async function analyzePart() {
 
     if (d.known_issues?.length) {
       for (const cat of d.known_issues) {
-        html += `<h3 style="color:var(--accent);font-size:14.5px;margin:14px 0 6px">📚 ایرادات شناخته‌شده: ${esc(cat.category)} <span style="font-size:11px;color:var(--muted)">(بروزرسانی: ${esc(cat.updated_at)})</span></h3><ul style="padding-right:18px;line-height:2;font-size:13.5px">`;
+        html += `<h3 style="color:var(--accent);font-size:14px;margin:14px 0 6px">📚 ایرادات شناخته‌شده: ${esc(cat.category)}</h3><ul style="padding-right:18px;line-height:2;font-size:13px">`;
         for (const i of cat.issues) {
           html += `<li><b>${esc(i.issue_fa)}</b><br><span style="color:var(--muted)">علت: ${esc(i.cause_fa)} | تشخیص: ${esc(i.detection_fa)}</span></li>`;
         }
@@ -577,14 +700,11 @@ async function analyzePart() {
 
     const a = d.analysis;
     if (a && !a.unavailable && a.summary) {
-      html += `<h3 style="color:var(--accent);font-size:14.5px;margin:14px 0 6px">🤖 تحلیل جامع مدل هوش مصنوعی</h3><p style="font-size:13.5px;line-height:2">${esc(a.summary)}</p>`;
+      html += `<h3 style="color:var(--accent);font-size:14px;margin:14px 0 6px">🤖 تحلیل جامع هوش مصنوعی</h3><p style="font-size:13.5px;line-height:2">${esc(a.summary)}</p>`;
       if (a.failure_modes?.length) {
         html += '<div>' + a.failure_modes.map(f => `<div class="rc"><div class="head"><div class="cause" style="font-size:13.5px">${esc(f.mode)}</div>${likBadge(f.likelihood)}</div><div class="evidence">${esc(f.why || '')}</div></div>`).join('') + '</div>';
       }
-      if (a.inspection_steps?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">مراحل تست و بازرسی</h3><ol style="padding-right:18px;line-height:2;font-size:13.5px">${a.inspection_steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
-      if (a.process_notes?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">نکات فرآیندی و مونتاژ</h3><ul style="padding-right:18px;line-height:2;font-size:13.5px">${a.process_notes.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
-    } else {
-      html += '<p class="hint">🤖 برای تحلیل زنده هوش مصنوعی، تنظیمات مدل را فعال کنید.</p>';
+      if (a.inspection_steps?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">مراحل تست و اندازه‌گیری</h3><ol style="padding-right:18px;line-height:2;font-size:13px">${a.inspection_steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
     }
     partResult.innerHTML = html;
   } catch (e) {
@@ -597,6 +717,32 @@ async function analyzePart() {
 
 partAnalyzeBtn.onclick = analyzePart;
 [partNameInput, partNoInput].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') analyzePart(); }));
+
+// ---------- PINOUTS TAB ----------
+async function loadPinoutsData() {
+  try {
+    const list = await fetch('/api/pinouts').then(r => r.json());
+    els.pinoutsContainer.innerHTML = list.map(item => `
+      <div style="background:var(--panel-2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <b style="color:var(--accent);font-size:15px">${esc(item.part_no)} — ${esc(item.name_fa)}</b>
+          <span class="band Medium" dir="ltr">${esc(item.package)} | Stock: ${esc(item.part_code)}</span>
+        </div>
+        <table class="pinout-table">
+          <thead><tr><th>پایه (Pin)</th><th>نام سیگنال</th><th>توضیحات و عملکرد</th></tr></thead>
+          <tbody>
+            ${item.key_pins.map(p => `<tr><td style="font-weight:700;color:var(--accent)">${esc(p.pin)}</td><td dir="ltr" style="text-align:right"><b>${esc(p.name)}</b></td><td>${esc(p.desc)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <div style="margin-top:10px;font-size:13px;background:var(--panel);padding:10px;border-radius:8px;line-height:1.8">
+          <b style="color:var(--good)">روش تست و ولتاژگیری: </b>${esc(item.test_procedure_fa)}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    console.warn('Error loading pinouts:', e);
+  }
+}
 
 // ---------- KNOWLEDGE & DATABASE TAB ----------
 function updateDbStats(s) {
@@ -622,7 +768,7 @@ async function loadKnowledgeData() {
 
 function renderKnowledgeList(list) {
   if (!list || !list.length) {
-    els.userKnowledgeList.innerHTML = '<p class="hint">هنوز تجربه یا قانونی توسط شما در دیتابیس ثبت نشده است. از فرم بالا اولین مورد را اضافه کنید.</p>';
+    els.userKnowledgeList.innerHTML = '<p class="hint">هنوز تجربه‌ای ثبت نشده است. از فرم بالا اولین مورد را ثبت کنید.</p>';
     return;
   }
   els.userKnowledgeList.innerHTML = list.map(item => `
@@ -642,7 +788,7 @@ function renderKnowledgeList(list) {
 
 function renderCasesList(cases) {
   if (!cases || !cases.length) {
-    els.recentCasesList.innerHTML = '<p class="hint">هنوز پرونده عیب‌یابی در دیتابیس ثبت نشده است.</p>';
+    els.recentCasesList.innerHTML = '<p class="hint">هنوز پرونده‌ای در دیتابیس ثبت نشده است.</p>';
     return;
   }
   els.recentCasesList.innerHTML = cases.map(c => `
@@ -696,4 +842,26 @@ els.addKnowledgeBtn.onclick = async () => {
   } finally {
     els.addKnowledgeBtn.disabled = false;
   }
+};
+
+// Export DB
+els.exportDbBtn.onclick = () => window.open('/api/db/export', '_blank');
+
+// Import DB
+els.importDbBtn.onclick = () => els.importDbInput.click();
+els.importDbInput.onchange = async () => {
+  const file = els.importDbInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const json = JSON.parse(e.target.result);
+      const res = await api('/api/db/import', json);
+      alert(`✅ دیتابیس با موفقیت وارد شد!\nتجربیات واردشده: ${res.imported_knowledge}\nپرونده‌های واردشده: ${res.imported_cases}`);
+      loadKnowledgeData();
+    } catch (err) {
+      showError('خطا در واردسازی دیتابیس: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
 };

@@ -15,10 +15,12 @@ import {
   findLearnedMemory,
   getDbStats,
 } from './db.js';
+import { lookupDtc, DTC_DATABASE } from './dtc_db.js';
+import { getPinoutData, PINOUTS_DATABASE } from './pinouts_db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
@@ -37,6 +39,7 @@ const sessions = new Map();
 // ---- BOM (Bill of Materials) ----
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
+const XLSX = require('xlsx');
 
 const BOM_PATH = process.env.BOM_PATH || path.join(__dirname, '..', 'data', 'bom.csv');
 const BOM_XLSX_CANDIDATES = [
@@ -49,26 +52,23 @@ let BOM = [];
 let BOM_SOURCE = 'none';
 let BOM_PRODUCT = '';
 
-function loadBomXlsx(file) {
-  const XLSX = require('xlsx');
-  const wb = XLSX.readFile(file);
+function parseBomWorkbook(wb, sourceLabel = 'xlsx') {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-  // product name from the header block
+  let product = '';
   for (const row of rows.slice(0, 8)) {
     const i = row.findIndex((c) => /product\s*name/i.test(String(c)));
     if (i >= 0) {
-      BOM_PRODUCT = row.slice(i + 1).map(String).find((c) => c.trim()) || '';
+      product = row.slice(i + 1).map(String).find((c) => c.trim()) || '';
       break;
     }
   }
 
-  // locate the header row of the parts table
   const headIdx = rows.findIndex(
     (r) => r.some((c) => /part\s*name/i.test(String(c))) && r.some((c) => /designator/i.test(String(c)))
   );
-  if (headIdx < 0) throw new Error('parts table header not found');
+  if (headIdx < 0) throw new Error('ستون‌های جدول BOM (شامل Part Name و Designator) پیدا نشد.');
   const head = rows[headIdx].map((c) => String(c).trim());
   const col = (re) => head.findIndex((h) => re.test(h));
   const cItem = col(/^item$/i), cDes = col(/designator/i), cName = col(/part\s*name/i);
@@ -95,27 +95,20 @@ function loadBomXlsx(file) {
       notes: String(r[cNote] ?? '').trim(),
     });
   }
-  return parts;
-}
 
-function loadBomCsv() {
-  const lines = fs.readFileSync(BOM_PATH, 'utf8').trim().split(/\r?\n/);
-  const head = lines[0].split(',').map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const cols = line.split(',');
-    const row = {};
-    head.forEach((h, i) => (row[h] = (cols[i] || '').trim()));
-    return row;
-  }).filter((r) => r.part_code);
+  BOM = parts;
+  BOM_SOURCE = sourceLabel;
+  BOM_PRODUCT = product;
+  return { count: parts.length, product };
 }
 
 function loadBom() {
   for (const file of BOM_XLSX_CANDIDATES) {
     try {
       if (fs.existsSync(file)) {
-        BOM = loadBomXlsx(file);
-        BOM_SOURCE = 'xlsx';
-        console.log(`BOM (Excel) loaded: ${BOM.length} parts from ${file}${BOM_PRODUCT ? ` — product: ${BOM_PRODUCT}` : ''}`);
+        const wb = XLSX.readFile(file);
+        const res = parseBomWorkbook(wb, 'xlsx');
+        console.log(`BOM (Excel) loaded: ${res.count} parts from ${file}${res.product ? ` — product: ${res.product}` : ''}`);
         return;
       }
     } catch (e) {
@@ -123,7 +116,14 @@ function loadBom() {
     }
   }
   try {
-    BOM = loadBomCsv();
+    const lines = fs.readFileSync(BOM_PATH, 'utf8').trim().split(/\r?\n/);
+    const head = lines[0].split(',').map((h) => h.trim());
+    BOM = lines.slice(1).map((line) => {
+      const cols = line.split(',');
+      const row = {};
+      head.forEach((h, i) => (row[h] = (cols[i] || '').trim()));
+      return row;
+    }).filter((r) => r.part_code);
     BOM_SOURCE = 'csv';
     console.log(`BOM (CSV) loaded: ${BOM.length} parts from ${BOM_PATH}`);
   } catch (e) {
@@ -135,7 +135,7 @@ loadBom();
 
 function bomForSystem(system) {
   if (!BOM.length) return [];
-  if (BOM_SOURCE === 'xlsx') return BOM;
+  if (BOM_SOURCE === 'xlsx' || BOM_SOURCE === 'upload') return BOM;
   if (!system) return [];
   return BOM.filter((p) => p.system === system).slice(0, 30);
 }
@@ -228,7 +228,7 @@ function newState(symptom, language = 'fa', useBom = true, maxQuestions = DEFAUL
     unresolved_conflicts: [],
     known_issue_matches: [],
     pending_question: null,
-    phase: 'interview', // interview | escalated | concluded
+    phase: 'interview',
   };
 }
 
@@ -249,12 +249,12 @@ function quickSafetyCheck(text) {
   return SAFETY_PATTERNS.some((re) => re.test(text));
 }
 
-function fallbackLabel(lang) {
+function fallbackLabel() {
   return 'هیچ‌کدام / مطابقت ندارد — لطفاً توضیح بدهید';
 }
 
-function ensureFallbackOption(options, lang) {
-  const fb = fallbackLabel(lang);
+function ensureFallbackOption(options) {
+  const fb = fallbackLabel();
   const opts = Array.isArray(options) ? options.filter((o) => typeof o === 'string' && o.trim()) : [];
   const hasFb = opts.some((o) => /هیچ.?کدام|مطابقت ندارد|none of the above|does not match/i.test(o));
   if (!hasFb) opts.push(fb);
@@ -262,7 +262,7 @@ function ensureFallbackOption(options, lang) {
 }
 
 // ---- LLM call helper ----
-async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 2500 }) {
+async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 3000 }) {
   const body = {
     model,
     temperature,
@@ -357,7 +357,7 @@ async function nextStep(cfg, state) {
     if (state.question_count >= state.max_questions) return { conclude: true };
     return {
       question: 'این مشکل از چه زمانی شروع شد و تحت چه شرایطی بیشتر دیده می‌شود؟',
-      options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند روز/هفته', 'از بدو مونتاژ / ابتدای کارکرد', 'فقط در شرایط خاص (دما/بار بالا)', fallbackLabel('fa')],
+      options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند روز/هفته', 'از بدو مونتاژ / ابتدای کارکرد', 'فقط در شرایط خاص (دما/بار بالا)', fallbackLabel()],
       leading_hypotheses: state.leading_hypotheses,
       ruled_out: state.ruled_out,
       _fallback: true,
@@ -386,6 +386,23 @@ async function finalReport(cfg, state) {
       band: (h.confidence ?? 30) >= 70 ? 'High' : (h.confidence ?? 30) >= 40 ? 'Medium' : 'Low',
       evidence: 'بر اساس پاسخ‌های مصاحبه عیب‌یابی و بررسی تجربیات دیتابیس',
     })),
+    five_whys: [
+      `چرا ۱: علامت اولیه "${state.symptom}" ثبت شده است.`,
+      'چرا ۲: سیگنال الکتریکی یا پاسخ واحد کنترل در حد مطلوب نیست.',
+      'چرا ۳: قطعی مسیر یا عدم عملکرد صحیح قطعه درایور ایجاد شده است.',
+      'چرا ۴: قطعه تحت تنش حرارتی/ولتاژی یا لحیم‌کاری نامناسب قرار داشته است.',
+      'چرا ۵: نیاز به بازرسی کیفیت مونتاژ و تست قطعات روی خط.',
+    ],
+    eight_d_report: {
+      d1_team: 'تیم مهندسی تست و تضمین کیفیت',
+      d2_problem: `بررسی عیب: ${state.symptom}`,
+      d3_containment: 'قرنطینه بردهای دارای علامت مشابه و بازرسی چشمی',
+      d4_root_cause: (state.leading_hypotheses?.[0]?.hypothesis || 'نقص قطعه یا لحیم‌کاری'),
+      d5_corrective_actions: 'تعویض قطعه آسیب‌دیده و بهبود پروفایل حرارتی لحیم',
+      d6_verification: 'تست عملکردی با دستگاه دیاگ و اسیلوسکوپ',
+      d7_prevention: 'بازنگری چک‌لیست بازرسی فرآیند مونتاژ SMT',
+      d8_closure: 'تایید نهایی تکنسین و بستن پرونده در دیتابیس',
+    },
     unresolved_conflicts: state.unresolved_conflicts || [],
     recommended_actions: [
       'بازرسی فیزیکی، تست پیوستگی و ولتاژ طبق مستندات و نقشه‌های رسمی',
@@ -396,7 +413,7 @@ async function finalReport(cfg, state) {
   };
 }
 
-function escalationPayload(lang, reason) {
+function escalationPayload(reason) {
   return {
     escalated: true,
     title: 'ارجاع فوری',
@@ -445,17 +462,15 @@ function isDemoKey(apiKey) {
   return process.env.DEMO_MODE === '1' || /^demo$/i.test(apiKey);
 }
 
-const DEMO_QUESTIONS = {
-  fa: [
-    { question: 'این مشکل از چه زمانی شروع شد؟', options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم'] },
-    { question: 'مشکل در چه شرایطی بیشتر خود را نشان می‌دهد؟', options: ['فقط در استارت سرد', 'فقط پس از گرم شدن', 'در همه شرایط', 'فقط زیر بار / کارکرد سنگین'] },
-    { question: 'آیا چراغ هشداری روی پنل یا ال‌ای‌دی خطا روشن است؟', options: ['بله، هشدار فعال است', 'خیر، هیچ چراغی روشن نیست', 'مطمئن نیستم'] },
-    { question: 'وضعیت ولتاژ تغذیه و تغذیه ورودی چگونه است؟', options: ['ولتاژ در حد نرمال است', 'افت ولتاژ مشاهده می‌شود', 'تغذیه قطع است / تست نشده'] },
-  ],
-};
+const DEMO_QUESTIONS = [
+  { question: 'این مشکل از چه زمانی شروع شد؟', options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم'] },
+  { question: 'مشکل در چه شرایطی بیشتر خود را نشان می‌دهد؟', options: ['فقط در استارت سرد', 'فقط پس از گرم شدن', 'در همه شرایط', 'فقط زیر بار / کارکرد سنگین'] },
+  { question: 'آیا چراغ هشداری روی پنل یا ال‌ای‌دی خطا روشن است؟', options: ['بله، هشدار فعال است', 'خیر، هیچ چراغی روشن نیست', 'مطمئن نیستم'] },
+  { question: 'وضعیت ولتاژ تغذیه و تغذیه ورودی چگونه است؟', options: ['ولتاژ در حد نرمال است', 'افت ولتاژ مشاهده می‌شود', 'تغذیه قطع است / تست نشده'] },
+];
 
 function demoNextStep(state) {
-  const qs = DEMO_QUESTIONS.fa;
+  const qs = DEMO_QUESTIONS;
   if (state.question_count >= qs.length) return { conclude: true };
   const q = qs[state.question_count];
   const hypos = [
@@ -475,6 +490,23 @@ function demoFinalReport(state) {
         evidence: 'حالت دمو: پاسخ‌ها در دیتابیس ثبت شد ولی پردازش زنده مدل انجام نشد.',
       },
     ],
+    five_whys: [
+      `چرا ۱: علامت ${state.symptom} رخ داد.`,
+      'چرا ۲: افت ولتاژ در مدار ایجاد شده است.',
+      'چرا ۳: مقاومت اهمی مسیر افزایش یافته است.',
+      'چرا ۴: قلع‌مردگی پایه قطعه وجود دارد.',
+      'چرا ۵: نیاز به کنترل دمای کوره SMT در خط مونتاژ.',
+    ],
+    eight_d_report: {
+      d1_team: 'تیم کیفیت و مهندسی خط تولید',
+      d2_problem: `گزارش عیب نمونه: ${state.symptom}`,
+      d3_containment: 'بررسی ۱۰۰٪ بردهای همان بچ تولیدی',
+      d4_root_cause: 'نقص لحیم‌کاری پایه آی‌سی بر اثر شوک حرارتی',
+      d5_corrective_actions: 'اصلاح پروفایل خمیر قلع و کوره Reflow',
+      d6_verification: 'تست تست‌بک ۱۰۰ عددی بدون خطا',
+      d7_prevention: 'بروزرسانی استانداردهای بازرسی چشمی AOI',
+      d8_closure: 'ثبت در دیتابیس و پایان پرونده 8D',
+    },
     unresolved_conflicts: [],
     recommended_actions: [
       'بررسی اتصالات، تست ولتاژ و بازرسی میکروسکوپی/چشمی طبق نقشه‌ها',
@@ -509,6 +541,46 @@ app.get('/api/bom', (req, res) => {
   res.json({ total: BOM.length, source: BOM_SOURCE, product: BOM_PRODUCT, parts: system ? bomForSystem(system) : BOM });
 });
 
+// Upload direct BOM Excel file
+app.post('/api/bom/upload', (req, res) => {
+  try {
+    const { base64, filename } = req.body || {};
+    if (!base64) return res.status(400).json({ error: 'base64 data required' });
+    const buffer = Buffer.from(base64, 'base64');
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    const result = parseBomWorkbook(wb, 'upload');
+
+    // Persist to app/data/BOM.xlsx
+    const targetPath = path.join(__dirname, '..', 'data', 'BOM.xlsx');
+    fs.writeFileSync(targetPath, buffer);
+
+    res.json({ ok: true, count: result.count, product: result.product, filename });
+  } catch (e) {
+    res.status(400).json({ error: 'خطا در بارگذاری فایل اکسل BOM: ' + e.message });
+  }
+});
+
+// DTC API
+app.get('/api/dtc/list', (req, res) => {
+  res.json(DTC_DATABASE);
+});
+
+app.get('/api/dtc/lookup', (req, res) => {
+  const code = (req.query.code || '').toString();
+  const match = lookupDtc(code);
+  res.json({ match });
+});
+
+// Pinout API
+app.get('/api/pinouts', (req, res) => {
+  res.json(PINOUTS_DATABASE);
+});
+
+app.get('/api/pinouts/:partCode', (req, res) => {
+  const match = getPinoutData(req.params.partCode);
+  res.json({ match });
+});
+
 // Database endpoints
 app.get('/api/db/stats', (req, res) => {
   res.json(getDbStats());
@@ -541,6 +613,37 @@ app.delete('/api/db/knowledge/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Database Export & Import
+app.get('/api/db/export', (req, res) => {
+  const knowledge = getUserKnowledgeList();
+  const cases = getAllCases(200);
+  res.setHeader('Content-Disposition', 'attachment; filename="diagnostic_learning_db.json"');
+  res.setHeader('Content-Type', 'application/json');
+  res.json({ exported_at: new Date().toISOString(), stats: getDbStats(), user_knowledge: knowledge, cases });
+});
+
+app.post('/api/db/import', (req, res) => {
+  try {
+    const data = req.body || {};
+    let countK = 0, countC = 0;
+    if (Array.isArray(data.user_knowledge)) {
+      for (const k of data.user_knowledge) {
+        addUserKnowledge(k);
+        countK++;
+      }
+    }
+    if (Array.isArray(data.cases)) {
+      for (const c of data.cases) {
+        saveCase(c);
+        countC++;
+      }
+    }
+    res.json({ ok: true, imported_knowledge: countK, imported_cases: countC, stats: getDbStats() });
+  } catch (e) {
+    res.status(400).json({ error: 'خطا در واردسازی دیتابیس: ' + e.message });
+  }
+});
+
 // Part analysis
 app.post('/api/part/analyze', async (req, res) => {
   try {
@@ -554,11 +657,13 @@ app.post('/api/part/analyze', async (req, res) => {
       partName || bomMatch?.part_name_en || '',
       partNo || bomMatch?.part_no || bomMatch?.part_code || ''
     );
+    const pinout = getPinoutData(partNo || bomMatch?.part_no || bomMatch?.part_code);
     const learned = findLearnedMemory(`${partName} ${partNo}`, 'electrical', partNo || bomMatch?.part_code);
 
     const base = {
       query: { part_name: partName, part_no: partNo },
       bom_match: bomMatch,
+      pinout: pinout,
       known_issues: cats.map((c) => ({
         category: c.title_fa,
         updated_at: c.updated_at,
@@ -645,21 +750,29 @@ app.post('/api/known-issues/refresh', async (req, res) => {
 app.post('/api/session/start', async (req, res) => {
   try {
     const symptom = (req.body?.symptom || '').toString().trim();
-    if (!symptom) return res.status(400).json({ error: 'symptom is required' });
+    const dtc = (req.body?.dtc || '').toString().trim();
+    if (!symptom && !dtc) return res.status(400).json({ error: 'symptom is required' });
     const cfg = getLlmConfig(req);
     if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
 
+    let fullSymptom = symptom;
+    if (dtc) {
+      const dtcInfo = lookupDtc(dtc);
+      const dtcDesc = dtcInfo ? ` [کد خطای دیاگ ${dtcInfo.code}: ${dtcInfo.desc_fa}]` : ` [DTC: ${dtc}]`;
+      fullSymptom = `${dtcDesc} ${symptom}`;
+    }
+
     const useBom = req.body?.use_bom !== false;
     const maxQuestions = Number(req.body?.max_questions) || DEFAULT_MAX_QUESTIONS;
-    const state = newState(symptom, 'fa', useBom, maxQuestions);
+    const state = newState(fullSymptom, 'fa', useBom, maxQuestions);
     const id = crypto.randomUUID();
     sessions.set(id, state);
 
     // immediate safety screen
-    if (quickSafetyCheck(symptom)) {
+    if (quickSafetyCheck(fullSymptom)) {
       state.phase = 'escalated';
       saveCase({ id, symptom: state.symptom, system: state.system, findings: [], root_causes: [{ cause: 'ارجاع فوری به دلیل ریسک ایمنی', confidence: 99 }] });
-      return res.json({ sessionId: id, ...escalationPayload('fa'), state: publicState(state) });
+      return res.json({ sessionId: id, ...escalationPayload(), state: publicState(state) });
     }
 
     const step = await nextStep(cfg, state);
@@ -692,11 +805,10 @@ app.post('/api/session/answer', async (req, res) => {
     state.question_count += 1;
     state.pending_question = null;
 
-    // safety screen on answers
     if (quickSafetyCheck(finalAnswer)) {
       state.phase = 'escalated';
       saveCase({ id, symptom: state.symptom, system: state.system, findings: state.findings, root_causes: [{ cause: 'ارجاع فوری به دلیل ریسک ایمنی', confidence: 99 }] });
-      return res.json({ sessionId: id, ...escalationPayload('fa'), state: publicState(state) });
+      return res.json({ sessionId: id, ...escalationPayload(), state: publicState(state) });
     }
 
     const step = await nextStep(cfg, state);
@@ -706,7 +818,7 @@ app.post('/api/session/answer', async (req, res) => {
   }
 });
 
-// Extend question limit (Ask more questions)
+// Extend questions
 app.post('/api/session/extend', async (req, res) => {
   try {
     const id = (req.body?.sessionId || '').toString();
@@ -760,14 +872,13 @@ async function handleStep(res, id, state, step, cfg) {
   if (step.escalate) {
     state.phase = 'escalated';
     saveCase({ id, symptom: state.symptom, system: state.system, findings: state.findings, root_causes: [{ cause: step.reason || 'ارجاع فوری', confidence: 99 }] });
-    return res.json({ sessionId: id, ...escalationPayload('fa', step.reason), state: publicState(state) });
+    return res.json({ sessionId: id, ...escalationPayload(step.reason), state: publicState(state) });
   }
   if (step.conclude || state.question_count >= state.max_questions) {
     applyStateUpdates(state, step);
     const report = await finalReport(cfg, state);
     state.phase = 'concluded';
 
-    // Auto-save to database for learning
     saveCase({
       id,
       symptom: state.symptom,
@@ -785,7 +896,7 @@ async function handleStep(res, id, state, step, cfg) {
     });
   }
   applyStateUpdates(state, step);
-  const options = ensureFallbackOption(step.options, 'fa');
+  const options = ensureFallbackOption(step.options);
   state.pending_question = { question: step.question, options };
   return res.json({
     sessionId: id,
@@ -822,7 +933,7 @@ function handleError(res, e) {
     return res.status(402).json({ error: 'insufficient_balance', detail: e.message });
   }
   if (/fetch failed/i.test(e.message || '')) {
-    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل هوش مصنوعی (DeepSeek یا سرور لوکال) برقرار نشد. آدرس و شبکه را بررسی کنید یا از حالت دمو استفاده نمایید.' });
+    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل برقرار نشد. شبکه یا سرور لوکال را بررسی کنید یا از حالت دمو استفاده کنید.' });
   }
   return res.status(500).json({ error: 'server_error', detail: e.message });
 }

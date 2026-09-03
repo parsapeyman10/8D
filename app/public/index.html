@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>دستیار عیب‌یابی هدایت‌شده با دیتابیس و یادگیری</title>
+<title>دستیار تخصصی عیب‌یابی و گزارش 8D</title>
 <style>
   :root {
     --bg: #0f172a;
@@ -30,16 +30,17 @@
   }
   header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 22px;
+    padding: 10px 20px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; z-index: 10;
+    position: sticky; top: 0; z-index: 20;
+    flex-wrap: wrap; gap: 10px;
   }
-  header h1 { font-size: 17px; margin: 0; display:flex; align-items:center; gap:10px; }
-  header h1 .logo { font-size: 22px; }
-  .nav-tabs { display:flex; gap:6px; }
+  header h1 { font-size: 16px; margin: 0; display:flex; align-items:center; gap:8px; }
+  header h1 .logo { font-size: 20px; }
+  .nav-tabs { display:flex; gap:6px; flex-wrap:wrap; }
   .nav-tabs button {
-    font-size: 13.5px; padding: 7px 14px; border-radius: 9px;
+    font-size: 13px; padding: 7px 13px; border-radius: 9px;
     background: transparent; color: var(--muted); border: 1px solid transparent;
   }
   .nav-tabs button.active {
@@ -50,7 +51,7 @@
   .dot.ok { background: var(--good); }
   button {
     font-family: inherit; cursor: pointer; border: none;
-    border-radius: 10px; padding: 9px 16px; font-size: 14px;
+    border-radius: 10px; padding: 9px 15px; font-size: 13.5px;
     background: var(--panel-2); color: var(--text);
     transition: background .15s, transform .05s;
   }
@@ -63,7 +64,7 @@
   button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
   button:disabled { opacity: .5; cursor: not-allowed; }
 
-  main { max-width: 1140px; margin: 0 auto; padding: 22px 18px 60px; display: grid; grid-template-columns: 1fr 330px; gap: 20px; }
+  main { max-width: 1140px; margin: 0 auto; padding: 20px 16px 60px; display: grid; grid-template-columns: 1fr 330px; gap: 20px; }
   @media (max-width: 920px) { main { grid-template-columns: 1fr; } }
 
   .tab-content { display: none; }
@@ -79,10 +80,19 @@
   textarea, input[type="text"], input[type="password"], select {
     width: 100%; background: var(--bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 14px; font-family: inherit; font-size: 14.5px;
+    padding: 11px 13px; font-family: inherit; font-size: 14.5px;
     resize: vertical;
   }
   textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent-2); border-color: transparent; }
+
+  .input-with-mic { position: relative; }
+  .mic-btn {
+    position: absolute; left: 10px; bottom: 12px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+    font-size: 13px; color: var(--muted); cursor: pointer;
+  }
+  .mic-btn.listening { background: var(--danger); color: #fff; animation: pulse 1s infinite; }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
   .examples { display:flex; flex-wrap:wrap; gap:8px; margin: 12px 0 16px; }
   .examples button { font-size: 12.5px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); }
@@ -134,6 +144,23 @@
   .report h3 { font-size: 15px; margin: 20px 0 8px; color: var(--accent); }
   .report ul, .report ol { margin: 0; padding-right: 20px; line-height: 2.1; font-size: 14px; }
 
+  /* 5-Whys Flowchart */
+  .whys-tree { display:flex; flex-direction:column; gap:8px; margin: 12px 0 16px; }
+  .why-node {
+    background: var(--panel-2); border-right: 4px solid var(--accent);
+    padding: 10px 14px; border-radius: 8px; font-size: 13.5px; line-height: 1.8;
+  }
+
+  /* 8D Section */
+  .eight-d-box {
+    margin-top: 22px; padding: 18px; border: 1px solid var(--accent);
+    border-radius: 12px; background: rgba(56,189,248,.04);
+  }
+  .eight-d-box h3 { color: var(--accent); margin: 0 0 12px; }
+  .eight-d-grid { display:grid; grid-template-columns: 1fr; gap:10px; font-size:13.5px; }
+  .eight-d-item { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .eight-d-item b { color: var(--accent); display:block; margin-bottom:3px; }
+
   .feedback-box {
     margin-top: 20px; padding: 16px; border: 1px solid var(--purple);
     border-radius: 12px; background: rgba(168,85,247,.08);
@@ -157,43 +184,53 @@
   .stat-card .num { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
   .stat-card .lbl { font-size: 12px; color: var(--muted); }
 
-  .db-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
-  .db-table th, .db-table td { padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--border); }
-  .db-table th { background: var(--panel-2); color: var(--muted); }
+  /* Pinout table */
+  .pinout-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  .pinout-table th, .pinout-table td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--border); }
+  .pinout-table th { background: var(--panel-2); color: var(--accent); }
 
   /* modal */
   .modal-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    position: fixed; inset: 0; background: rgba(0,0,0,.65);
     display: none; align-items: center; justify-content: center; z-index: 50;
   }
   .modal-backdrop.show { display: flex; }
   .modal {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 24px; width: min(500px, 92vw);
+    border-radius: var(--radius); padding: 24px; width: min(520px, 92vw); max-height: 90vh; overflow-y: auto;
   }
   .modal h2 { margin: 0 0 8px; font-size: 17px; }
-  .modal .hint a { color: var(--accent); }
   .modal-actions { display:flex; gap:10px; margin-top: 16px; justify-content: flex-start; }
   .provider-tabs { display:flex; flex-direction:column; gap:8px; margin: 10px 0 16px; }
   .provider-tabs label { font-size: 14px; display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px 12px; border:1px solid var(--border); border-radius:10px; }
   .provider-tabs label:has(input:checked) { border-color: var(--accent-2); background: rgba(14,165,233,.08); }
-  .provider-tabs input { accent-color: var(--accent-2); }
   .fld { display:block; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
   .fld input, .fld textarea, .fld select { margin-top: 5px; font-size: 13.5px; }
   .hidden { display: none !important; }
+
+  /* Print Styles for 8D */
+  @media print {
+    body { background: #fff !important; color: #000 !important; font-size: 12pt; }
+    header, aside, .q-actions, .nav-tabs, .feedback-box, #startCard, #questionCard, button { display: none !important; }
+    main { grid-template-columns: 1fr !important; max-width: 100% !important; padding: 0 !important; }
+    .card, .eight-d-box, .eight-d-item, .rc { background: #fff !important; color: #000 !important; border: 1px solid #ccc !important; box-shadow: none !important; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1><span class="logo">🔧</span> دستیار عیب‌یابی هدایت‌شده <span style="font-size:12px;color:var(--muted);font-weight:400">IKCO Platforms</span></h1>
+  <h1><span class="logo">🔧</span> دستیار عیب‌یابی و گزارش 8D <span style="font-size:12px;color:var(--muted);font-weight:400">IKCO & PCBA</span></h1>
   <nav class="nav-tabs">
     <button class="active" id="tabDiagnosisBtn">🔧 عیب‌یابی</button>
-    <button id="tabPartBtn">🔎 تحلیل قطعه</button>
+    <button id="tabPartBtn">🔎 تحلیل قطعه و تست</button>
+    <button id="tabPinoutsBtn">📐 نقشه تست پایه‌ها</button>
     <button id="tabKnowledgeBtn">🧠 دیتابیس و یادگیری</button>
   </nav>
-  <div style="display:flex;align-items:center;gap:14px">
-    <span class="key-status"><span id="keyDot" class="dot"></span><span id="keyText">کلید API تنظیم نشده</span></span>
-    <button id="settingsBtn">⚙️ تنظیمات مدل</button>
+  <div style="display:flex;align-items:center;gap:10px">
+    <button id="uploadBomBtn" style="font-size:12px;padding:6px 10px" title="آپلود فایل اکسل BOM جدید">📁 آپلود BOM</button>
+    <input type="file" id="bomFileInput" accept=".xlsx,.xls,.csv" style="display:none" />
+    <span class="key-status"><span id="keyDot" class="dot"></span><span id="keyText">کلید API</span></span>
+    <button id="settingsBtn">⚙️ تنظیمات</button>
   </div>
 </header>
 
@@ -206,17 +243,27 @@
       <!-- Start card -->
       <div class="card" id="startCard">
         <h2>شروع عیب‌یابی هدایت‌شده</h2>
-        <p class="hint">علامت یا مشکل را بنویسید. دستیار با استفاده از حافظه دیتابیس و پرسیدن سوالات گزینه‌ای، علت ریشه‌ای را مشخص می‌کند. پس از ۸ سوال می‌توانید عیب‌یابی را ادامه دهید تا به دقیق‌ترین پاسخ برسید.</p>
+        <p class="hint">علامت خرابی را بنویسید یا بگویید. دستیار با بررسی حافظه دیتابیس و پرسش‌های گزینه‌ای، زنجیره ۵ چرا و گزارش استاندارد 8D را تولید می‌کند.</p>
         
-        <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text);margin-bottom:12px;cursor:pointer">
-          <input type="checkbox" id="useBomCheckbox" checked />
-          <span>🧩 استفاده از قطعات برد (BOM) در عیب‌یابی <span style="color:var(--muted);font-size:12px">(در صورت غیرفعال بودن، عیب‌یابی به‌صورت عمومی و آزاد انجام می‌شود)</span></span>
-        </label>
+        <div style="display:grid;grid-template-columns:1fr 180px;gap:10px;margin-bottom:10px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="useBomCheckbox" checked />
+            <span>🧩 استفاده از BOM برد <span style="color:var(--muted);font-size:11.5px">(فعال)</span></span>
+          </label>
+          <div style="position:relative">
+            <input type="text" id="dtcInput" list="dtcList" placeholder="کد خطای DTC (اختیاری)" dir="ltr" style="padding:7px 10px;font-size:13px" />
+            <datalist id="dtcList"></datalist>
+          </div>
+        </div>
 
-        <textarea id="symptomInput" rows="3" placeholder="مثلاً: برد SBM بعد از مونتاژ روشن نمی‌شود یا ارتباط شبکه CAN قطع است..."></textarea>
+        <div class="input-with-mic">
+          <textarea id="symptomInput" rows="3" placeholder="مثلاً: ارتباط شبکه CAN بعد از مونتاژ برد قطع است یا ولتاژ ۵ ولت صفر شده..."></textarea>
+          <button type="button" class="mic-btn" id="micBtn" title="ورودی صوتی (صحبت کنید)">🎤 ورودی صوتی</button>
+        </div>
+
         <div class="examples">
           <button data-ex="برد SBM روشن نمی‌شود و ولتاژ ۵ ولت صفر است">روشن نشدن برد SBM</button>
-          <button data-ex="ارتباط CAN با میکروکنترلر قطع است و پیام ارسال نمی‌شود">قطع ارتباط CAN</button>
+          <button data-ex="ارتباط CAN با نود مرکزی قطع است و پیام ارسال نمی‌شود">قطع ارتباط CAN</button>
           <button data-ex="موتور در استارت سرد صدای تق‌تق می‌دهد">صدای تق‌تق استارت سرد</button>
           <button data-ex="کولر باد گرم می‌زند و خنک نمی‌کند">کولر خنک نمی‌کند</button>
         </div>
@@ -240,10 +287,10 @@
           </div>
         </div>
         <div class="q-actions">
-          <button id="concludeEarlyBtn" class="secondary" title="در صورت تمایل می‌توانید همین حالا گزارش نهایی را دریافت کنید">📊 دریافت گزارش نهایی تحلیل</button>
-          <button id="extendQuestionsBtn" class="secondary">➕ افزودن ۴ سوال تکمیلی بیشتر (+۴)</button>
+          <button id="concludeEarlyBtn" class="secondary">📊 دریافت گزارش نهایی هم‌اکنون</button>
+          <button id="extendQuestionsBtn" class="secondary">➕ افزودن ۴ سوال تکمیلی (+۴)</button>
         </div>
-        <div class="loading-row hidden" id="qLoading"><span class="spinner"></span><span>در حال تحلیل پاسخ و استنتاج با مدل هوش مصنوعی...</span></div>
+        <div class="loading-row hidden" id="qLoading"><span class="spinner"></span><span>در حال تحلیل و استنتاج با مدل هوش مصنوعی...</span></div>
       </div>
 
       <!-- Escalation card -->
@@ -257,29 +304,46 @@
 
       <!-- Report card -->
       <div class="card report hidden" id="reportCard">
-        <h2>📋 گزارش نهایی عیب‌یابی (بررسی هوش مصنوعی)</h2>
+        <h2>📋 گزارش تحلیلی عیب‌یابی (بررسی هوش مصنوعی)</h2>
         <p class="hint" id="reportSymptom"></p>
+        
         <h3>علت(های) ریشه‌ای</h3>
         <div id="rootCauses"></div>
-        <h3>تناقض‌های حل‌نشده</h3>
-        <ul id="conflictsList"></ul>
-        <h3>اقدام پیشنهادی</h3>
+
+        <!-- 5-Whys Tree -->
+        <h3>🔍 تحلیل زنجیره علی ۵ چرا (5-Whys Tree)</h3>
+        <div class="whys-tree" id="whysTree"></div>
+
+        <!-- 8D Quality Report -->
+        <div class="eight-d-box" id="eightDBox">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <h3>📑 فرم گزارش رسمی حل مسئله ۸ مرحله‌ای (8D Report)</h3>
+            <div style="display:flex;gap:6px">
+              <button class="secondary" id="printReportBtn" style="font-size:12px">🖨️ چاپ / ذخیره PDF</button>
+              <button class="secondary" id="copyReportBtn" style="font-size:12px">📋 کپی متن 8D</button>
+            </div>
+          </div>
+          <div class="eight-d-grid" id="eightDGrid"></div>
+        </div>
+
+        <h3>اقدام پیشنهادی تکنسین</h3>
         <ol id="actionsList"></ol>
-        <h3>شرایط ارجاع</h3>
+        
+        <h3>تناقض‌های حل‌نشده و شرایط ارجاع</h3>
+        <ul id="conflictsList"></ul>
         <ul id="escalateIfList"></ul>
 
-        <!-- User Feedback & Learning Box -->
+        <!-- Feedback & Learning Box -->
         <div class="feedback-box">
           <h4>🧠 ثبت بازخورد در حافظه یادگیری دیتابیس</h4>
-          <p class="hint" style="margin-bottom:8px">با تایید نتیجه، این پرونده در دیتابیس ذخیره شده و مدل در موارد مشابه آینده از این تجربه برای تشخیص سریع‌تر استفاده می‌کند.</p>
           <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:8px;cursor:pointer">
             <input type="checkbox" id="confirmResultCheckbox" checked />
-            <b>تایید می‌کنم این علت ریشه‌ای و راهکار صحیح بود</b>
+            <b>تایید می‌کنم این علت ریشه‌ای صحیح بود و در حافظه یادگیری ذخیره شود</b>
           </label>
-          <textarea id="feedbackNotesInput" rows="2" placeholder="یادداشت تکمیلی تکنسین (اختیاری): مثلاً با تعویض خازن C105 مشکل حل شد..."></textarea>
+          <textarea id="feedbackNotesInput" rows="2" placeholder="یادداشت تکمیلی تکنسین (اختیاری): مثلاً با تعویض دیود ESD مشکل حل شد..."></textarea>
           <div style="margin-top:8px">
             <button class="purple" id="saveFeedbackBtn">💾 ثبت بازخورد در دیتابیس یادگیری</button>
-            <span id="feedbackSavedMsg" style="color:var(--good);font-size:13px;margin-right:10px;display:none">✅ در حافظه دیتابیس ذخیره شد!</span>
+            <span id="feedbackSavedMsg" style="color:var(--good);font-size:13px;margin-right:10px;display:none">✅ در حافظه دیتابیس ثبت شد!</span>
           </div>
         </div>
 
@@ -294,7 +358,7 @@
     <div class="tab-content" id="tabPart">
       <div class="card">
         <h2>🔎 تحلیل قطعه (Part Name + Part No.)</h2>
-        <p class="hint">اطلاعات قطعه را وارد کنید — نتیجه: تطبیق با BOM، بررسی پایگاه دانش و دیتابیس، و تحلیل حالت‌های خرابی توسط مدل هوش مصنوعی.</p>
+        <p class="hint">اطلاعات قطعه را وارد کنید — نتیجه: تطبیق با BOM، بررسی نقشه تست پایه‌ها، و تحلیل حالت‌های خرابی.</p>
         
         <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text);margin-bottom:12px;cursor:pointer">
           <input type="checkbox" id="partUseBomCheckbox" checked />
@@ -313,23 +377,38 @@
         </div>
         <div style="display:flex;gap:10px;margin-top:10px">
           <button class="primary" id="partAnalyzeBtn">تحلیل قطعه</button>
-          <button id="issuesRefreshBtn" title="بروزرسانی دیتابیس ایرادات با کمک مدل">🔄 بروزرسانی دیتابیس ایرادات</button>
+          <button id="issuesRefreshBtn" title="بروزرسانی دیتابیس ایرادات با کمک مدل">🔄 بروزرسانی ایرادات</button>
         </div>
-        <div class="loading-row hidden" id="partLoading"><span class="spinner"></span><span>در حال تحلیل قطعه با مدل هوش مصنوعی...</span></div>
+        <div class="loading-row hidden" id="partLoading"><span class="spinner"></span><span>در حال تحلیل قطعه...</span></div>
         <div id="partResult" style="margin-top:14px"></div>
       </div>
     </div>
 
-    <!-- TAB 3: Database & Learning Knowledge -->
+    <!-- TAB 3: Pinouts & Electronics Test Points -->
+    <div class="tab-content" id="tabPinouts">
+      <div class="card">
+        <h2>📐 نقشه تست پایه‌ها، ولتاژها و سیگنال‌های کلیدی قطعات</h2>
+        <p class="hint">راهنمای تست ولتاژ و اسیلوسکوپ برای آی‌سی‌ها و قطعات کلیدی برد SBM/IKCO.</p>
+        <div id="pinoutsContainer"></div>
+      </div>
+    </div>
+
+    <!-- TAB 4: Database & Learning Knowledge -->
     <div class="tab-content" id="tabKnowledge">
       <div class="card">
         <h2>🧠 پایگاه دانش، دیتابیس و یادگیری تجربی</h2>
-        <p class="hint">تمام پرونده‌های عیب‌یابی و تجربیاتی که ثبت می‌کنید در این دیتابیس ذخیره می‌شوند. هوش مصنوعی به طور خودکار قبل از هر عیب‌یابی این تجربیات را جستجو کرده و در تحلیل خود به کار می‌برد.</p>
+        <p class="hint">مدیریت تجربیات ثبت‌شده، پشتیبان‌گیری و تاریخچه پرونده‌های حل‌شده در دیتابیس.</p>
         
         <div class="stats-grid">
-          <div class="stat-card"><div class="num" id="statTotalCases">0</div><div class="lbl">کل پرونده‌های ثبت‌شده</div></div>
+          <div class="stat-card"><div class="num" id="statTotalCases">0</div><div class="lbl">کل پرونده‌ها</div></div>
           <div class="stat-card"><div class="num" id="statConfirmedCases">0</div><div class="lbl">پرونده‌های تاییدشده</div></div>
-          <div class="stat-card"><div class="num" id="statUserKnowledge">0</div><div class="lbl">تجربیات کاربر در دیتابیس</div></div>
+          <div class="stat-card"><div class="num" id="statUserKnowledge">0</div><div class="lbl">تجربیات ثبت‌شده</div></div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <button class="secondary" id="exportDbBtn">💾 دانلود فایل پشتیبان دیتابیس (JSON)</button>
+          <button class="secondary" id="importDbBtn">📥 واردسازی فایل پشتیبان</button>
+          <input type="file" id="importDbInput" accept=".json" style="display:none" />
         </div>
 
         <h3>➕ ثبت تجربه / قانون خرابی جدید در دیتابیس</h3>
@@ -376,7 +455,7 @@
     </div>
     <div class="card">
       <h3>🧠 حافظه تجربی دیتابیس</h3>
-      <div id="learnedMemoryBox"><p class="hint" style="margin:0">تجربیات بازیابی‌شده از دیتابیس برای این مورد نمایش داده می‌شوند.</p></div>
+      <div id="learnedMemoryBox"><p class="hint" style="margin:0">تجربیات بازیابی‌شده از دیتابیس نمایش داده می‌شوند.</p></div>
     </div>
     <div class="card">
       <h3>❌ رد شده</h3>
