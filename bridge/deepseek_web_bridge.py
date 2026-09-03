@@ -7,6 +7,10 @@
 
 آدرس برای اپ:  http://localhost:8765/v1
 در اپ: ⚙️ تنظیمات مدل → 🌐 مرورگر کروم (پل سلنیومی)
+
+نصب و اجرا:
+    pip install selenium flask
+    python bridge/deepseek_web_bridge.py
 """
 
 import json
