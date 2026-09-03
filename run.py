@@ -2,15 +2,14 @@
 """
 اجراکننده خودکار و یکپارچه «دستیار عیب‌یابی هدایت‌شده و گزارش 8D»
 ==================================================================
+مجهز به هوش مصنوعی پیش‌فرض Google Gemini (gemini-1.5-flash)
+
 فقط این فایل را اجرا کنید:  python run.py
 (یا در ویندوز روی آن دابل‌کلیک کنید)
 
-این اسکریپت همه‌چیز را به صورت خودکار، بدون نیاز به VPN و یک‌جا بالا می‌آورد:
- 1. بررسی و نصب خودکار وابستگی‌های Node.js
- 2. راه‌اندازی سرور اصلی و پایگاه دانش یادگیری (Port 3000)
- 3. فعال‌سازی موتور هوش مصنوعی تخصصی آفلاین (کارکرد ۱۰۰٪ بدون اینترنت)
- 4. راه‌اندازی پل وب سلنیوم ضد تحریم (در صورت تمایل و وجود ماژول‌ها)
- 5. باز کردن خودکار مرورگر روی http://localhost:3000
+ 1. بررسی و راه‌اندازی سرور اصلی و پایگاه دانش (Port 3000)
+ 2. فعال‌سازی پیش‌فرض مدل Google Gemini 1.5 Flash (با فال‌بک خودکار به موتور آفلاین)
+ 3. باز کردن خودکار مرورگر روی http://localhost:3000
 """
 
 import os
@@ -21,8 +20,9 @@ import sys
 import time
 import webbrowser
 
-# غیرفعال‌سازی دانلود اینترنتی Selenium Manager برای عدم وابستگی به اینترنت
 os.environ["SE_OFFLINE"] = "true"
+os.environ["LLM_PROVIDER"] = os.environ.get("LLM_PROVIDER", "gemini")
+os.environ["GEMINI_MODEL"] = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(HERE, "app")
@@ -78,15 +78,11 @@ def start_bridge():
     if not os.path.isfile(BRIDGE_SCRIPT):
         return None
     if not check_python_bridge_deps():
-        say("ℹ️ ماژول‌های پل سلنیوم نصب نیستند؛ برنامه با موتور هوش مصنوعی آفلاین داخلی بالا می‌آید.")
         return None
-
-    say("🌐 در حال بررسی و راه‌اندازی پل وب (Selenium Bridge)...")
     try:
         proc = subprocess.Popen([sys.executable, BRIDGE_SCRIPT], cwd=os.path.dirname(BRIDGE_SCRIPT))
         return proc
-    except Exception as e:
-        say(f"⚠️ پل وب رد شد ({e}). برنامه با موتور آفلاین کار خواهد کرد.")
+    except Exception:
         return None
 
 
@@ -97,7 +93,7 @@ def start_server(node):
 def main():
     say("=" * 68)
     say("  🔧 دستیار تخصصی عیب‌یابی خودرو و گزارش کیفیت 8D")
-    say("  ⚡ پشتیبانی ۱۰۰٪ آفلاین (بدون نیاز به فیلترشکن و بدون اینترنت)")
+    say("  ⚡ مدل هوش مصنوعی پیش‌فرض: Google Gemini 1.5 Flash")
     say("=" * 68)
 
     if not os.path.isdir(APP_DIR):
@@ -120,14 +116,9 @@ def main():
     server_proc = None
 
     try:
-        # ۱. اجرای پل وب در پس‌زمینه (اختیاری)
-        if not port_open(BRIDGE_PORT):
-            bridge_proc = start_bridge()
-            time.sleep(1)
-
-        # ۲. اجرای سرور اصلی Node با موتور هوشمند
+        # اجرای سرور اصلی Node با پیش‌فرض Google Gemini
         if not port_open(PORT):
-            say("🚀 در حال راه‌اندازی سرور و موتور هوش مصنوعی تخصصی...")
+            say("🚀 در حال راه‌اندازی سرور و موتور هوش مصنوعی...")
             server_proc = start_server(node)
 
             for _ in range(60):
@@ -153,12 +144,11 @@ def main():
         say("\n" + "═" * 68)
         say(f"  🎉 برنامه با موفقیت اجرا شد!")
         say(f"  🌐 آدرس دسترسی در مرورگر: http://localhost:{PORT}")
-        say(f"  ⚡ موتور هوش مصنوعی آفلاین: فعال (بدون نیاز به اینترنت و بدون VPN)")
+        say(f"  ⚡ مدل فعال: Google Gemini (gemini-1.5-flash)")
         say(f"  🧠 پایگاه دانش یادگیری دیتابیس: آماده به کار")
-        say(f"  📊 گزارش‌ساز رسمی 8D و نمودار ۵ چرا: فعال")
-        if port_open(BRIDGE_PORT):
-            say(f"  🌉 پل مرورگر کروم: http://localhost:{BRIDGE_PORT}/v1 (فعال)")
-        say(f"  برای خروج و خاموش کردن برنامه: در این پنجره کلیدهای Ctrl+C را بزنید.")
+        say(f"  📊 گزارش‌ساز 8D و تحلیل ۵ چرا: فعال")
+        say(f"  برای تست زنده Gemini: python test_gemini.py")
+        say(f"  برای خروج و خاموش کردن: در این پنجره کلیدهای Ctrl+C را بزنید.")
         say("═" * 68 + "\n")
 
         webbrowser.open(URL)

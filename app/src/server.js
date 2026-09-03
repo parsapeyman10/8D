@@ -18,6 +18,7 @@ import {
 import { lookupDtc, DTC_DATABASE } from './dtc_db.js';
 import { getPinoutData, PINOUTS_DATABASE } from './pinouts_db.js';
 import { runOfflineStep, runOfflineReport } from './offline_engine.js';
+import { callGemini, testGemini } from './gemini.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -25,10 +26,10 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
-const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
-const ENV_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-const CHAT_MODEL = process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat';
-const REASONER_MODEL = process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-reasoner';
+const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'gemini';
+const ENV_GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+const ENV_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
+const GEMINI_DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 const DEFAULT_MAX_QUESTIONS = 8;
 
 // Initialize Learning Database
@@ -262,7 +263,7 @@ function ensureFallbackOption(options) {
   return opts;
 }
 
-// ---- LLM call helper ----
+// ---- Generic LLM call helper ----
 async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 3000 }) {
   const body = {
     model,
@@ -276,7 +277,7 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
   if (jsonMode && !/reasoner|r1/i.test(model)) {
     body.response_format = { type: 'json_object' };
   }
-  const base = (cfg.baseUrl || DEEPSEEK_BASE_URL).replace(/\/+$/, '');
+  const base = (cfg.baseUrl || 'https://api.deepseek.com').replace(/\/+$/, '');
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -287,7 +288,7 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    const err = new Error(`DeepSeek API error ${res.status}: ${text.slice(0, 500)}`);
+    const err = new Error(`LLM API error ${res.status}: ${text.slice(0, 500)}`);
     err.status = res.status;
     throw err;
   }
@@ -316,14 +317,44 @@ function tryParseJson(text) {
 }
 
 async function callJson(opts, retries = 1) {
-  let content = await callDeepSeek(opts);
+  const cfg = opts.cfg;
+  let content = '';
+
+  if (cfg.provider === 'gemini') {
+    content = await callGemini({
+      apiKey: cfg.apiKey || ENV_GEMINI_KEY,
+      model: opts.model || cfg.chatModel || 'gemini-1.5-flash',
+      system: opts.system,
+      user: opts.user,
+      temperature: opts.temperature ?? 0.1,
+      jsonMode: true,
+      maxTokens: opts.maxTokens || 3500,
+      baseUrl: cfg.baseUrl,
+    });
+  } else {
+    content = await callDeepSeek(opts);
+  }
+
   let parsed = tryParseJson(content);
   while (parsed === null && retries > 0) {
     retries -= 1;
-    content = await callDeepSeek({
-      ...opts,
-      user: opts.user + '\n\nReturn valid JSON only. No prose, no markdown, no explanation.',
-    });
+    if (cfg.provider === 'gemini') {
+      content = await callGemini({
+        apiKey: cfg.apiKey || ENV_GEMINI_KEY,
+        model: opts.model || cfg.chatModel || 'gemini-1.5-flash',
+        system: opts.system,
+        user: opts.user + '\n\nReturn valid JSON only. No markdown, no formatting.',
+        temperature: opts.temperature ?? 0.1,
+        jsonMode: true,
+        maxTokens: opts.maxTokens || 3500,
+        baseUrl: cfg.baseUrl,
+      });
+    } else {
+      content = await callDeepSeek({
+        ...opts,
+        user: opts.user + '\n\nReturn valid JSON only. No prose, no markdown, no explanation.',
+      });
+    }
     parsed = tryParseJson(content);
   }
   return parsed;
@@ -355,12 +386,12 @@ async function nextStep(cfg, state) {
       model: cfg.chatModel,
       system: TIER1_QUESTION_SELECTOR,
       user: JSON.stringify(caseStateForModel(state)),
-      temperature: 0,
+      temperature: 0.1,
     });
 
     if (parsed) return parsed;
   } catch (err) {
-    console.warn('⚠️ اتصال به مدل خارجی برقرار نشد، جابجایی خودکار به موتور هوش مصنوعی آفلاین:', err.message);
+    console.warn(`⚠️ فراخوانی مدل (${cfg.provider}) با خطا مواجه شد (${err.message}). جابجایی خودکار به موتور هوش مصنوعی آفلاین.`);
     return runOfflineStep(state);
   }
 
@@ -385,7 +416,7 @@ async function finalReport(cfg, state) {
     });
     if (parsed && Array.isArray(parsed.root_causes)) return parsed;
   } catch (err) {
-    console.warn('⚠️ اتصال به مدل برای گزارش نهایی ناموفق بود، تولید گزارش با موتور آفلاین:', err.message);
+    console.warn(`⚠️ دریافت گزارش از مدل (${cfg.provider}) ناموفق بود (${err.message}). صدور گزارش با موتور تخصصی آفلاین.`);
     return runOfflineReport(state);
   }
 
@@ -403,45 +434,58 @@ function escalationPayload(reason) {
 }
 
 function getApiKey(req) {
-  return (req.headers['x-deepseek-key'] || '').toString().trim() || ENV_API_KEY;
+  return (
+    (req.headers['x-gemini-key'] || '').toString().trim() ||
+    (req.headers['x-deepseek-key'] || '').toString().trim() ||
+    ENV_GEMINI_KEY ||
+    ENV_DEEPSEEK_KEY
+  );
 }
 
 function getLlmConfig(req) {
-  const provider = (req.headers['x-provider'] || '').toString().trim() || (process.env.LLM_PROVIDER || 'offline');
+  const provider = (req.headers['x-provider'] || '').toString().trim() || DEFAULT_PROVIDER;
   const apiKey = getApiKey(req);
   const headerBase = (req.headers['x-base-url'] || '').toString().trim();
-  const chatModel = (req.headers['x-chat-model'] || '').toString().trim() || CHAT_MODEL;
-  const reasonerModel = (req.headers['x-reasoner-model'] || '').toString().trim() || REASONER_MODEL;
+  const chatModel = (req.headers['x-chat-model'] || '').toString().trim();
+  const reasonerModel = (req.headers['x-reasoner-model'] || '').toString().trim();
 
-  let baseUrl = DEEPSEEK_BASE_URL;
-  if (provider === 'local') {
+  // Handle Gemini (Default)
+  if (provider === 'gemini') {
+    return {
+      provider: 'gemini',
+      apiKey: apiKey || ENV_GEMINI_KEY,
+      baseUrl: headerBase || 'https://generativelanguage.googleapis.com/v1beta',
+      chatModel: chatModel || GEMINI_DEFAULT_MODEL,
+      reasonerModel: reasonerModel || chatModel || GEMINI_DEFAULT_MODEL,
+      demo: isDemoKey(apiKey),
+      offline: false,
+      needsKey: true,
+    };
+  }
+
+  if (provider === 'offline' || provider === 'local_offline') {
+    return { provider: 'offline', offline: true, needsKey: false };
+  }
+
+  let baseUrl = 'https://api.deepseek.com';
+  if (provider === 'local' || provider === 'ollama') {
     baseUrl = headerBase || process.env.LOCAL_BASE_URL || 'http://localhost:11434/v1';
   } else if (provider === 'bridge') {
     baseUrl = headerBase || 'http://localhost:8765/v1';
-  } else if (provider === 'ollama') {
-    baseUrl = headerBase || 'http://localhost:11434/v1';
   } else if (provider === 'lmstudio') {
     baseUrl = headerBase || 'http://localhost:1234/v1';
   } else if (headerBase) {
     baseUrl = headerBase;
   }
-  if (!/^https?:\/\//i.test(baseUrl)) baseUrl = DEEPSEEK_BASE_URL;
-
-  let effReasoner = reasonerModel;
-  if (!req.headers['x-reasoner-model'] && headerBase && !/deepseek\.com/i.test(baseUrl)) {
-    effReasoner = (req.headers['x-chat-model'] || '').toString().trim() || chatModel;
-  }
-
-  const isOffline = provider === 'offline' || provider === 'local_offline';
 
   return {
     provider,
     apiKey,
     baseUrl,
-    chatModel: (provider === 'local' || provider === 'ollama') && !req.headers['x-chat-model'] ? (process.env.LOCAL_MODEL || 'deepseek-r1:8b') : chatModel,
-    reasonerModel: (provider === 'local' || provider === 'ollama') && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || 'deepseek-r1:8b') : effReasoner,
+    chatModel: chatModel || (provider === 'local' || provider === 'ollama' ? 'deepseek-r1:8b' : 'deepseek-chat'),
+    reasonerModel: reasonerModel || chatModel || (provider === 'local' || provider === 'ollama' ? 'deepseek-r1:8b' : 'deepseek-reasoner'),
     demo: isDemoKey(apiKey),
-    offline: isOffline,
+    offline: false,
     needsKey: provider === 'cloud' || provider === 'custom',
   };
 }
@@ -515,7 +559,10 @@ function applyStateUpdates(state, parsed) {
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
-    hasEnvKey: Boolean(ENV_API_KEY),
+    defaultProvider: 'gemini',
+    defaultModel: GEMINI_DEFAULT_MODEL,
+    hasGeminiKey: Boolean(ENV_GEMINI_KEY),
+    hasDeepseekKey: Boolean(ENV_DEEPSEEK_KEY),
     maxQuestions: DEFAULT_MAX_QUESTIONS,
     bomParts: BOM.length,
     bomSource: BOM_SOURCE,
@@ -523,6 +570,21 @@ app.get('/api/health', (req, res) => {
     dbStats: getDbStats(),
     offlineEngine: true,
   });
+});
+
+// One-Click Gemini Live Connection Test (ارتباط برقرار است؟)
+app.post('/api/gemini/test', async (req, res) => {
+  try {
+    const apiKey = (req.body?.apiKey || '').toString().trim() || ENV_GEMINI_KEY;
+    const model = (req.body?.model || '').toString().trim() || GEMINI_DEFAULT_MODEL;
+    if (!apiKey) {
+      return res.status(400).json({ ok: false, error: 'لطفاً ابتدا کلید Gemini API را وارد کنید.' });
+    }
+    const result = await testGemini(apiKey, model);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || 'خطا در برقراری ارتباط با Google Gemini' });
+  }
 });
 
 app.get('/api/bom', (req, res) => {
@@ -755,7 +817,6 @@ app.post('/api/session/start', async (req, res) => {
     const dtc = (req.body?.dtc || '').toString().trim();
     if (!symptom && !dtc) return res.status(400).json({ error: 'symptom is required' });
     const cfg = getLlmConfig(req);
-    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
 
     let fullSymptom = symptom;
     if (dtc) {
@@ -793,8 +854,6 @@ app.post('/api/session/answer', async (req, res) => {
     if (state.phase !== 'interview') return res.status(400).json({ error: 'session_closed' });
 
     const cfg = getLlmConfig(req);
-    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
-
     const answer = (req.body?.answer || '').toString().trim();
     const freeText = (req.body?.freeText || '').toString().trim();
     if (!answer && !freeText) return res.status(400).json({ error: 'answer is required' });
@@ -931,15 +990,15 @@ function handleError(res, e) {
   if (e.status === 401 || e.status === 403) {
     return res.status(401).json({ error: 'invalid_api_key', detail: e.message });
   }
-  if (e.status === 402) {
-    return res.status(402).json({ error: 'insufficient_balance', detail: e.message });
+  if (e.status === 429) {
+    return res.status(429).json({ error: 'rate_limit_exceeded', detail: e.message });
   }
   if (/fetch failed/i.test(e.message || '')) {
-    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل برقرار نشد. شبکه یا سرور لوکال را بررسی کنید یا از موتور هوش مصنوعی آفلاین داخلی استفاده نمایید.' });
+    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل هوش مصنوعی برقرار نشد. شبکه را بررسی کنید یا از موتور آفلاین استفاده نمایید.' });
   }
   return res.status(500).json({ error: 'server_error', detail: e.message });
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Guided Diagnostic Assistant listening on http://0.0.0.0:${PORT}`);
+  console.log(`Guided Diagnostic Assistant listening on http://0.0.0.0:${PORT} (Default Model: Google Gemini gemini-1.5-flash)`);
 });

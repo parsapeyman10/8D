@@ -12,6 +12,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "express": "^5.2.1",
     "xlsx": "^0.18.5"
   }
