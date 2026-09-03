@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-اجراکننده خودکار «دستیار عیب‌یابی هدایت‌شده»
+اجراکننده خودکار و یکپارچه «دستیار عیب‌یابی هدایت‌شده»
+======================================================
 فقط این فایل را اجرا کنید:  python run.py
 (یا در ویندوز روی آن دابل‌کلیک کنید)
 
-این اسکریپت خودش:
- 1. بررسی می‌کند Node.js نصب باشد
- 2. وابستگی‌ها را نصب می‌کند (فقط بار اول)
- 3. سرور را بالا می‌آورد
- 4. مرورگر را روی http://localhost:3000 باز می‌کند
+این اسکریپت همه‌چیز را به صورت خودکار و یک‌جا بالا می‌آورد:
+ 1. بررسی و نصب وابستگی‌های Node.js
+ 2. اجرای سرور عیب‌یابی و دیتابیس (Port 3000)
+ 3. اجرای خودکار پل وب کروم/سلنیوم (Port 8765 - در صورت نصب بودن کتابخانه‌ها)
+ 4. باز کردن خودکار مرورگر روی http://localhost:3000
+ 5. مدیریت و خاموش کردن یکپارچه تمام پردازش‌ها هنگام خروج
 """
 
 import os
@@ -21,7 +23,9 @@ import webbrowser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(HERE, "app")
+BRIDGE_SCRIPT = os.path.join(HERE, "bridge", "deepseek_web_bridge.py")
 PORT = int(os.environ.get("PORT", "3000"))
+BRIDGE_PORT = int(os.environ.get("BRIDGE_PORT", "8765"))
 URL = f"http://localhost:{PORT}"
 
 
@@ -37,7 +41,6 @@ def fail(msg):
 
 
 def find(cmd):
-    """پیدا کردن برنامه در سیستم (در ویندوز npm.cmd هم چک می‌شود)"""
     return shutil.which(cmd) or (shutil.which(cmd + ".cmd") if os.name == "nt" else None)
 
 
@@ -48,16 +51,40 @@ def port_open(port):
 
 
 def deps_ok():
-    """بررسی واقعی نصب بودن وابستگی‌ها (وجود خود پکیج express، نه فقط پوشه node_modules)"""
     return os.path.isdir(os.path.join(APP_DIR, "node_modules", "express"))
 
 
 def install_deps(npm):
-    say("📦 در حال نصب وابستگی‌ها (کمی صبر کنید)...")
+    say("📦 در حال نصب وابستگی‌های برنامه (فقط بار اول)...")
     r = subprocess.run([npm, "install", "--no-audit", "--no-fund"], cwd=APP_DIR)
     if r.returncode != 0 or not deps_ok():
-        fail("نصب وابستگی‌ها ناموفق بود. اتصال اینترنت را بررسی کنید و دوباره اجرا کنید.")
+        fail("نصب وابستگی‌ها ناموفق بود. اتصال اینترنت را بررسی کنید.")
     say("✅ وابستگی‌ها نصب شد.")
+
+
+def check_python_bridge_deps():
+    try:
+        import flask  # noqa
+        import selenium  # noqa
+        return True
+    except ImportError:
+        return False
+
+
+def start_bridge():
+    if not os.path.isfile(BRIDGE_SCRIPT):
+        return None
+    if not check_python_bridge_deps():
+        say("ℹ️ کتابخانه‌های selenium یا flask روی پایتون نصب نیستند (پل مرورگر رد شد).")
+        return None
+
+    say("🌐 در حال بالا آوردن پل مرورگر (Selenium Bridge)...")
+    try:
+        proc = subprocess.Popen([sys.executable, BRIDGE_SCRIPT], cwd=os.path.dirname(BRIDGE_SCRIPT))
+        return proc
+    except Exception as e:
+        say(f"⚠️ بالا آوردن پل با خطا مواجه شد: {e}")
+        return None
 
 
 def start_server(node):
@@ -65,77 +92,97 @@ def start_server(node):
 
 
 def main():
-    say("=" * 55)
-    say("  🔧 دستیار عیب‌یابی هدایت‌شده — اجراکننده خودکار")
-    say("=" * 55)
+    say("=" * 65)
+    say("  🔧 دستیار عیب‌یابی هدایت‌شده با دیتابیس یادگیری")
+    say("  اجرای یکپارچه: سرور اصلی + دیتابیس + پل مرورگر")
+    say("=" * 65)
 
-    # ۰) بررسی پوشه اپ
     if not os.path.isdir(APP_DIR):
-        fail("پوشه app پیدا نشد. این فایل باید کنار پوشه app (داخل پوشه 8D) باشد.")
+        fail("پوشه app پیدا نشد. این فایل باید در ریشه پروژه قرار داشته باشد.")
 
-    # ۱) بررسی Node.js
     node = find("node")
     npm = find("npm")
     if not node or not npm:
         fail(
             "Node.js روی سیستم شما نصب نیست.\n"
-            "   از این آدرس نسخه LTS را دانلود و نصب کنید (Next, Next, Finish):\n"
-            "   https://nodejs.org\n"
-            "   بعد از نصب، دوباره همین فایل را اجرا کنید."
+            "   از آدرس https://nodejs.org نسخه LTS را نصب کنید."
         )
     ver = subprocess.run([node, "-v"], capture_output=True, text=True).stdout.strip()
     say(f"✅ Node.js پیدا شد: {ver}")
 
-    # ۲) اگر سرور از قبل بالاست، فقط مرورگر را باز کن
-    if port_open(PORT):
-        say(f"ℹ️ سرور از قبل روی پورت {PORT} در حال اجراست — مرورگر باز می‌شود.")
-        webbrowser.open(URL)
-        return
-
-    # ۳) نصب وابستگی‌ها (اگر پکیج‌ها واقعاً موجود نباشند — حتی اگر پوشه node_modules خالی باشد)
     if not deps_ok():
         install_deps(npm)
 
-    # ۴) اجرای سرور
-    say("🚀 در حال بالا آوردن سرور...")
-    server = start_server(node)
+    bridge_proc = None
+    server_proc = None
 
-    # ۵) صبر تا آماده شدن و باز کردن مرورگر
-    for _ in range(60):
-        if server.poll() is not None:
-            # اگر سرور به‌خاطر پکیج ناقص بالا نیامد، یک بار نصب مجدد و تلاش دوباره
-            say("⚠️ سرور بالا نیامد — تلاش برای نصب مجدد وابستگی‌ها...")
-            install_deps(npm)
-            server = start_server(node)
+    try:
+        # ۱. اجرای پل وب (در صورت تمایل و عدم اجرا بودن از قبل)
+        if not port_open(BRIDGE_PORT):
+            bridge_proc = start_bridge()
+            time.sleep(1)
+
+        # ۲. اجرای سرور اصلی Node
+        if not port_open(PORT):
+            say("🚀 در حال راه‌اندازی سرور اصلی و پایگاه دانش دیتابیس...")
+            server_proc = start_server(node)
+
             for _ in range(60):
-                if server.poll() is not None:
-                    fail("سرور بالا نیامد. متن خطای بالا را بررسی/ارسال کنید.")
+                if server_proc.poll() is not None:
+                    say("⚠️ تلاش مجدد برای اجرای سرور...")
+                    install_deps(npm)
+                    server_proc = start_server(node)
+                    for _ in range(60):
+                        if server_proc.poll() is not None:
+                            fail("سرور اصلی بالا نیامد.")
+                        if port_open(PORT):
+                            break
+                        time.sleep(0.5)
+                    break
                 if port_open(PORT):
                     break
                 time.sleep(0.5)
-            break
-        if port_open(PORT):
-            break
-        time.sleep(0.5)
-    else:
-        fail("سرور در زمان مناسب آماده نشد.")
+            else:
+                fail("سرور در زمان مقرر پاسخ نداد.")
+        else:
+            say(f"ℹ️ سرور اصلی از قبل روی پورت {PORT} فعال است.")
 
-    say(f"\n✅ اپ آماده است: {URL}")
-    say("   از دکمه «⚙️ تنظیمات مدل» حالت ابری / لوکال / دمو را انتخاب کنید.")
-    say("   برای خاموش کردن سرور: در همین پنجره Ctrl+C بزنید (یا پنجره را ببندید).\n")
-    webbrowser.open(URL)
+        say("\n" + "═" * 65)
+        say(f"  🎉 تمام سرویس‌ها با موفقیت بالا آمدند!")
+        say(f"  🌐 آدرس اپلیکیشن: http://localhost:{PORT}")
+        if port_open(BRIDGE_PORT):
+            say(f"  🌉 پل مرورگر (سلنیوم): http://localhost:{BRIDGE_PORT}/v1 (فعال)")
+        say(f"  🧠 پایگاه دانش و دیتابیس یادگیری: آماده به کار")
+        say(f"  برای خاموش کردن همه سرویس‌ها: در این پنجره Ctrl+C بزنید.")
+        say("═" * 65 + "\n")
 
-    # ۶) زنده نگه داشتن تا کاربر ببندد
-    try:
-        server.wait()
+        webbrowser.open(URL)
+
+        # زنده نگه‌داشتن و مانیتور پردازش‌ها
+        while True:
+            if server_proc and server_proc.poll() is not None:
+                say("⚠️ سرور اصلی متوقف شد.")
+                break
+            time.sleep(1)
+
     except KeyboardInterrupt:
-        say("\n⏹ در حال خاموش کردن سرور...")
-        server.terminate()
-        try:
-            server.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            server.kill()
-        say("خداحافظ 👋")
+        say("\n⏹ در حال متوقف کردن تمام پردازش‌ها...")
+    finally:
+        if server_proc:
+            try:
+                server_proc.terminate()
+                server_proc.wait(timeout=3)
+            except Exception:
+                try: server_proc.kill()
+                except Exception: pass
+        if bridge_proc:
+            try:
+                bridge_proc.terminate()
+                bridge_proc.wait(timeout=3)
+            except Exception:
+                try: bridge_proc.kill()
+                except Exception: pass
+        say("همه سرویس‌ها با موفقیت خاموش شدند. خداحافظ 👋")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,17 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { TIER1_QUESTION_SELECTOR, TIER2_ANALYZER, PART_ANALYZER, ISSUE_UPDATER } from './prompts.js';
+import {
+  initDatabase,
+  saveCase,
+  updateCaseFeedback,
+  getAllCases,
+  addUserKnowledge,
+  getUserKnowledgeList,
+  deleteUserKnowledge,
+  findLearnedMemory,
+  getDbStats,
+} from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -15,14 +26,15 @@ const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek
 const ENV_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const CHAT_MODEL = process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat';
 const REASONER_MODEL = process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-reasoner';
-const MAX_QUESTIONS = 8;
+const DEFAULT_MAX_QUESTIONS = 8;
+
+// Initialize Learning Database
+initDatabase();
 
 // ---- in-memory session store ----
 const sessions = new Map();
 
 // ---- BOM (Bill of Materials) ----
-// Priority 1: a real product BOM in Excel (BOM.xlsx at repo root or app/data, or BOM_XLSX env)
-// Priority 2: the generic vehicle-parts CSV (app/data/bom.csv, or BOM_PATH env)
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
@@ -123,8 +135,6 @@ loadBom();
 
 function bomForSystem(system) {
   if (!BOM.length) return [];
-  // A product BOM (Excel) is the actual bill of the unit under diagnosis:
-  // always relevant, regardless of the classified vehicle system.
   if (BOM_SOURCE === 'xlsx') return BOM;
   if (!system) return [];
   return BOM.filter((p) => p.system === system).slice(0, 30);
@@ -141,7 +151,7 @@ function bomPartsForModel(system) {
   }));
 }
 
-// ---- Known-issues database (per-component failure knowledge, refreshable) ----
+// ---- Known-issues database ----
 const KNOWN_ISSUES_PATH = process.env.KNOWN_ISSUES_PATH || path.join(__dirname, '..', 'data', 'known_issues.json');
 let KNOWN_ISSUES = { updated_at: '', categories: [] };
 function loadKnownIssues() {
@@ -183,7 +193,6 @@ function findBomPart(partName, partNo) {
   return bestScore >= 2 ? best : null;
 }
 
-// quick keyword classifier so the BOM filter works from the first question
 const SYSTEM_KEYWORDS = [
   ['brakes', /ترمز|لنت|ABS|brake/i],
   ['SRS/airbag', /ایربگ|کیسه\s*هوا|airbag|srs/i],
@@ -201,11 +210,16 @@ function quickClassify(symptom) {
   return '';
 }
 
-function newState(symptom, language) {
+function newState(symptom, language = 'fa', useBom = true, maxQuestions = DEFAULT_MAX_QUESTIONS) {
+  const system = quickClassify(symptom);
+  const learned = findLearnedMemory(symptom, system);
   return {
     symptom,
-    system: quickClassify(symptom),
+    system,
     language,
+    use_bom: useBom,
+    max_questions: maxQuestions,
+    learned_memory: learned,
     question_count: 0,
     checks_done: [],
     findings: [],
@@ -216,10 +230,6 @@ function newState(symptom, language) {
     pending_question: null,
     phase: 'interview', // interview | escalated | concluded
   };
-}
-
-function detectLanguage(text) {
-  return /[\u0600-\u06FF]/.test(text) ? 'fa' : 'en';
 }
 
 const SAFETY_PATTERNS = [
@@ -240,9 +250,7 @@ function quickSafetyCheck(text) {
 }
 
 function fallbackLabel(lang) {
-  return lang === 'fa'
-    ? 'هیچ‌کدام / مطابقت ندارد — لطفاً توضیح بدهید'
-    : 'None of the above / does not match - please describe';
+  return 'هیچ‌کدام / مطابقت ندارد — لطفاً توضیح بدهید';
 }
 
 function ensureFallbackOption(options, lang) {
@@ -253,8 +261,8 @@ function ensureFallbackOption(options, lang) {
   return opts;
 }
 
-// ---- LLM call helper (DeepSeek cloud OR any OpenAI-compatible local server: Ollama, LM Studio, vLLM...) ----
-async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 2000 }) {
+// ---- LLM call helper ----
+async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 2500 }) {
   const body = {
     model,
     temperature,
@@ -264,7 +272,6 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
       { role: 'user', content: user },
     ],
   };
-  // reasoning models (deepseek-reasoner / R1) don't support response_format reliably
   if (jsonMode && !/reasoner|r1/i.test(model)) {
     body.response_format = { type: 'json_object' };
   }
@@ -289,13 +296,11 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
 
 function tryParseJson(text) {
   if (!text) return null;
-  // strip reasoning tags (local R1 models) and markdown fences if present
   let t = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   t = t.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   try {
     return JSON.parse(t);
   } catch {
-    // try to extract first {...} block
     const start = t.indexOf('{');
     const end = t.lastIndexOf('}');
     if (start >= 0 && end > start) {
@@ -325,17 +330,19 @@ async function callJson(opts, retries = 1) {
 
 function caseStateForModel(state) {
   const { pending_question, phase, ...rest } = state;
+  const useBom = state.use_bom !== false;
   return {
     ...rest,
-    ...(BOM_PRODUCT ? { bom_product: BOM_PRODUCT } : {}),
-    bom_parts: bomPartsForModel(state.system),
+    ...(useBom && BOM_PRODUCT ? { bom_product: BOM_PRODUCT } : {}),
+    ...(useBom ? { bom_parts: bomPartsForModel(state.system) } : {}),
+    learned_memory: state.learned_memory || [],
+    max_questions: state.max_questions || DEFAULT_MAX_QUESTIONS,
   };
 }
 
 // ---- Tier 1: next question ----
 async function nextStep(cfg, state) {
-  // hard cap enforced in code
-  if (state.question_count >= MAX_QUESTIONS) return { conclude: true };
+  if (state.question_count >= state.max_questions) return { conclude: true };
   if (cfg.demo) return demoNextStep(state);
 
   const parsed = await callJson({
@@ -347,18 +354,10 @@ async function nextStep(cfg, state) {
   });
 
   if (!parsed) {
-    // fallback: safe broad question or conclude
-    if (state.question_count >= MAX_QUESTIONS) return { conclude: true };
-    const lang = state.language;
+    if (state.question_count >= state.max_questions) return { conclude: true };
     return {
-      question:
-        lang === 'fa'
-          ? 'این مشکل از چه زمانی شروع شد؟'
-          : 'When did this problem start?',
-      options:
-        lang === 'fa'
-          ? ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم', fallbackLabel('fa')]
-          : ['Recently and suddenly', 'Gradually over weeks', 'Since the beginning', 'Not sure', fallbackLabel('en')],
+      question: 'این مشکل از چه زمانی شروع شد و تحت چه شرایطی بیشتر دیده می‌شود؟',
+      options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند روز/هفته', 'از بدو مونتاژ / ابتدای کارکرد', 'فقط در شرایط خاص (دما/بار بالا)', fallbackLabel('fa')],
       leading_hypotheses: state.leading_hypotheses,
       ruled_out: state.ruled_out,
       _fallback: true,
@@ -380,50 +379,30 @@ async function finalReport(cfg, state) {
   });
   if (parsed && Array.isArray(parsed.root_causes)) return parsed;
 
-  // fallback: build report from leading hypotheses
-  const lang = state.language;
   return {
     root_causes: (state.leading_hypotheses || []).slice(0, 3).map((h) => ({
       cause: h.hypothesis,
       confidence: Math.min(h.confidence ?? 30, 90),
       band: (h.confidence ?? 30) >= 70 ? 'High' : (h.confidence ?? 30) >= 40 ? 'Medium' : 'Low',
-      evidence: lang === 'fa' ? 'بر اساس پاسخ‌های ثبت‌شده در مصاحبه عیب‌یابی' : 'Based on recorded interview findings',
+      evidence: 'بر اساس پاسخ‌های مصاحبه عیب‌یابی و بررسی تجربیات دیتابیس',
     })),
     unresolved_conflicts: state.unresolved_conflicts || [],
     recommended_actions: [
-      lang === 'fa'
-        ? 'بازرسی فیزیکی و بررسی با دستگاه دیاگ طبق مستندات رسمی IKCO/OEM'
-        : 'Physical inspection and scan-tool check per official IKCO/OEM documentation',
+      'بازرسی فیزیکی، تست پیوستگی و ولتاژ طبق مستندات و نقشه‌های رسمی',
+      'بررسی اتصالات لحیم و سلامت مسیرهای تغذیه و دیتا',
     ],
-    escalate_if: [
-      lang === 'fa'
-        ? 'تکرار خرابی در چند خودرو یا وجود ریسک ایمنی'
-        : 'Failure repeats across vehicles or a safety risk exists',
-    ],
+    escalate_if: ['تکرار خرابی در چند نمونه یا وجود ریسک ایمنی و حرارتی'],
     _fallback: true,
   };
 }
 
 function escalationPayload(lang, reason) {
-  if (lang === 'fa') {
-    return {
-      escalated: true,
-      title: 'ارجاع فوری',
-      reason: reason || 'این مورد می‌تواند ایمنی خودرو یا سرنشینان را تحت تأثیر قرار دهد.',
-      required_action:
-        'خودرو نباید تا زمان بررسی توسط تکنسین ارشد / واحد مهندسی / مرجع مجاز، به‌صورت عادی استفاده شود.',
-      do_not:
-        'هیچ سیستم ایمنی، ترمز، فرمان، ایربگ، ABS، ایموبلایزر یا آلایندگی را برای تست غیرفعال، دور زده یا override نکنید.',
-    };
-  }
   return {
     escalated: true,
-    title: 'Immediate Escalation',
-    reason: reason || 'This issue may affect vehicle or occupant safety.',
-    required_action:
-      'The vehicle should not be used normally until inspected by a senior technician / engineering team / authorized authority.',
-    do_not:
-      'Do not disable, bypass, override, unplug, or defeat any safety, brake, steering, airbag, ABS, immobilizer, or emissions system for testing.',
+    title: 'ارجاع فوری',
+    reason: reason || 'این مورد می‌تواند ایمنی خودرو یا مدار را تحت تأثیر قرار دهد.',
+    required_action: 'دستگاه/خودرو نباید تا زمان بررسی توسط تکنسین ارشد / واحد مهندسی به‌صورت عادی استفاده شود.',
+    do_not: 'هیچ سیستم ایمنی، ترمز، فرمان، ایربگ، ABS، یا مدارهای حفاظتی را دور نزنید.',
   };
 }
 
@@ -431,7 +410,6 @@ function getApiKey(req) {
   return (req.headers['x-deepseek-key'] || '').toString().trim() || ENV_API_KEY;
 }
 
-// Build per-request LLM config from headers (set by the settings UI) with env fallbacks.
 function getLlmConfig(req) {
   const provider = (req.headers['x-provider'] || '').toString().trim() || (process.env.LLM_PROVIDER || 'cloud');
   const apiKey = getApiKey(req);
@@ -445,11 +423,8 @@ function getLlmConfig(req) {
   } else if (headerBase) {
     baseUrl = headerBase;
   }
-  // basic validation
   if (!/^https?:\/\//i.test(baseUrl)) baseUrl = DEEPSEEK_BASE_URL;
 
-  // For non-DeepSeek providers, "deepseek-reasoner" would be an invalid model:
-  // default the reasoner to the chat model when a custom base URL is used.
   let effReasoner = reasonerModel;
   if (!req.headers['x-reasoner-model'] && headerBase && !/deepseek\.com/i.test(baseUrl)) {
     effReasoner = (req.headers['x-chat-model'] || '').toString().trim() || chatModel;
@@ -462,7 +437,6 @@ function getLlmConfig(req) {
     chatModel: provider === 'local' && !req.headers['x-chat-model'] ? (process.env.LOCAL_MODEL || chatModel) : chatModel,
     reasonerModel: provider === 'local' && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || effReasoner) : effReasoner,
     demo: isDemoKey(apiKey),
-    // local servers don't need a key; cloud does (unless demo)
     needsKey: provider !== 'local',
   };
 }
@@ -471,57 +445,41 @@ function isDemoKey(apiKey) {
   return process.env.DEMO_MODE === '1' || /^demo$/i.test(apiKey);
 }
 
-// ---- Demo mode (no external API calls) ----
 const DEMO_QUESTIONS = {
   fa: [
     { question: 'این مشکل از چه زمانی شروع شد؟', options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم'] },
-    { question: 'مشکل در چه شرایطی بیشتر خود را نشان می‌دهد؟', options: ['فقط در استارت سرد', 'فقط پس از گرم شدن', 'در همه شرایط', 'فقط زیر بار / سربالایی'] },
-    { question: 'آیا چراغ هشداری روی صفحه کیلومتر روشن است؟', options: ['بله، چراغ چک', 'بله، چراغ دیگری', 'خیر، هیچ چراغی روشن نیست', 'مطمئن نیستم'] },
-    { question: 'آخرین سرویس دوره‌ای (روغن/فیلتر) چه زمانی انجام شده است؟', options: ['کمتر از ۵ هزار کیلومتر پیش', 'بین ۵ تا ۱۰ هزار کیلومتر پیش', 'بیش از ۱۰ هزار کیلومتر پیش / نمی‌دانم'] },
-  ],
-  en: [
-    { question: 'When did this problem start?', options: ['Recently and suddenly', 'Gradually over weeks', 'Since the beginning', 'Not sure'] },
-    { question: 'Under which condition does the problem appear most?', options: ['Only on cold start', 'Only after warm-up', 'All conditions', 'Only under load / uphill'] },
-    { question: 'Is any warning light on in the instrument cluster?', options: ['Yes, check engine light', 'Yes, another light', 'No lights on', 'Not sure'] },
-    { question: 'When was the last periodic service (oil/filter)?', options: ['Less than 5,000 km ago', '5,000-10,000 km ago', 'More than 10,000 km / not sure'] },
+    { question: 'مشکل در چه شرایطی بیشتر خود را نشان می‌دهد؟', options: ['فقط در استارت سرد', 'فقط پس از گرم شدن', 'در همه شرایط', 'فقط زیر بار / کارکرد سنگین'] },
+    { question: 'آیا چراغ هشداری روی پنل یا ال‌ای‌دی خطا روشن است؟', options: ['بله، هشدار فعال است', 'خیر، هیچ چراغی روشن نیست', 'مطمئن نیستم'] },
+    { question: 'وضعیت ولتاژ تغذیه و تغذیه ورودی چگونه است؟', options: ['ولتاژ در حد نرمال است', 'افت ولتاژ مشاهده می‌شود', 'تغذیه قطع است / تست نشده'] },
   ],
 };
 
 function demoNextStep(state) {
-  const qs = DEMO_QUESTIONS[state.language] || DEMO_QUESTIONS.fa;
+  const qs = DEMO_QUESTIONS.fa;
   if (state.question_count >= qs.length) return { conclude: true };
   const q = qs[state.question_count];
-  const hypos = state.language === 'fa'
-    ? [
-        { hypothesis: 'فرضیه نمونه ۱ (حالت دمو — بدون اتصال به DeepSeek)', confidence: 55 - state.question_count * 3 },
-        { hypothesis: 'فرضیه نمونه ۲', confidence: 30 },
-      ]
-    : [
-        { hypothesis: 'Sample hypothesis 1 (demo mode — no DeepSeek connection)', confidence: 55 - state.question_count * 3 },
-        { hypothesis: 'Sample hypothesis 2', confidence: 30 },
-      ];
+  const hypos = [
+    { hypothesis: 'فرضیه نمونه ۱ (حالت دمو — بدون اتصال به هوش مصنوعی)', confidence: 55 - state.question_count * 3 },
+    { hypothesis: 'فرضیه نمونه ۲', confidence: 30 },
+  ];
   return { ...q, system: state.system || 'other', leading_hypotheses: hypos, ruled_out: state.ruled_out };
 }
 
 function demoFinalReport(state) {
-  const fa = state.language === 'fa';
   return {
     root_causes: [
       {
-        cause: fa
-          ? 'این یک گزارش نمونه است — برای تحلیل واقعی، کلید DeepSeek API را در تنظیمات وارد کنید.'
-          : 'This is a sample report — enter a real DeepSeek API key in settings for actual analysis.',
+        cause: 'این یک گزارش نمونه است — برای تحلیل واقعی توسط هوش مصنوعی، تنظیمات مدل را بررسی کنید.',
         confidence: 50,
         band: 'Medium',
-        evidence: fa ? 'حالت دمو: پاسخ‌ها ثبت شد ولی تحلیل مدل انجام نشد.' : 'Demo mode: answers recorded but no model analysis was run.',
+        evidence: 'حالت دمو: پاسخ‌ها در دیتابیس ثبت شد ولی پردازش زنده مدل انجام نشد.',
       },
     ],
     unresolved_conflicts: [],
     recommended_actions: [
-      fa ? 'کلید واقعی DeepSeek را از platform.deepseek.com دریافت و در «تنظیمات API» وارد کنید.' : 'Get a real DeepSeek key from platform.deepseek.com and enter it in API settings.',
-      fa ? 'در استقرار واقعی، بازرسی فیزیکی و دیاگ طبق مستندات رسمی IKCO/OEM انجام شود.' : 'In real deployment, perform physical inspection and scan-tool check per official IKCO/OEM documentation.',
+      'بررسی اتصالات، تست ولتاژ و بازرسی میکروسکوپی/چشمی طبق نقشه‌ها',
     ],
-    escalate_if: [fa ? 'وجود هرگونه ریسک ایمنی' : 'Any safety risk exists'],
+    escalate_if: ['وجود هرگونه ریسک ایمنی'],
     demo: true,
   };
 }
@@ -532,9 +490,18 @@ function applyStateUpdates(state, parsed) {
   if (typeof parsed.system === 'string' && parsed.system) state.system = parsed.system;
 }
 
-// ---- routes ----
+// ---- ROUTES ----
+
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, hasEnvKey: Boolean(ENV_API_KEY), maxQuestions: MAX_QUESTIONS, bomParts: BOM.length, bomSource: BOM_SOURCE, bomProduct: BOM_PRODUCT });
+  res.json({
+    ok: true,
+    hasEnvKey: Boolean(ENV_API_KEY),
+    maxQuestions: DEFAULT_MAX_QUESTIONS,
+    bomParts: BOM.length,
+    bomSource: BOM_SOURCE,
+    bomProduct: BOM_PRODUCT,
+    dbStats: getDbStats(),
+  });
 });
 
 app.get('/api/bom', (req, res) => {
@@ -542,18 +509,52 @@ app.get('/api/bom', (req, res) => {
   res.json({ total: BOM.length, source: BOM_SOURCE, product: BOM_PRODUCT, parts: system ? bomForSystem(system) : BOM });
 });
 
-// ---- Part analysis: user gives Part Name + Part No. -> result ----
+// Database endpoints
+app.get('/api/db/stats', (req, res) => {
+  res.json(getDbStats());
+});
+
+app.get('/api/db/cases', (req, res) => {
+  res.json(getAllCases(50));
+});
+
+app.post('/api/db/cases/feedback', (req, res) => {
+  const { id, user_confirmed, user_feedback, root_cause } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  updateCaseFeedback(id, { user_confirmed, user_feedback, root_cause });
+  res.json({ ok: true });
+});
+
+app.get('/api/db/knowledge', (req, res) => {
+  res.json(getUserKnowledgeList());
+});
+
+app.post('/api/db/knowledge', (req, res) => {
+  const { title, symptom_trigger, root_cause, solution, part_code } = req.body || {};
+  if (!title && !root_cause) return res.status(400).json({ error: 'title and root_cause are required' });
+  const item = addUserKnowledge({ title, symptom_trigger, root_cause, solution, part_code });
+  res.json({ ok: true, item });
+});
+
+app.delete('/api/db/knowledge/:id', (req, res) => {
+  deleteUserKnowledge(req.params.id);
+  res.json({ ok: true });
+});
+
+// Part analysis
 app.post('/api/part/analyze', async (req, res) => {
   try {
     const partName = (req.body?.part_name || '').toString().trim();
     const partNo = (req.body?.part_no || '').toString().trim();
+    const useBom = req.body?.use_bom !== false;
     if (!partName && !partNo) return res.status(400).json({ error: 'part_name or part_no required' });
 
-    const bomMatch = findBomPart(partName, partNo);
+    const bomMatch = useBom ? findBomPart(partName, partNo) : null;
     const cats = issuesForPart(
       partName || bomMatch?.part_name_en || '',
       partNo || bomMatch?.part_no || bomMatch?.part_code || ''
     );
+    const learned = findLearnedMemory(`${partName} ${partNo}`, 'electrical', partNo || bomMatch?.part_code);
 
     const base = {
       query: { part_name: partName, part_no: partNo },
@@ -564,10 +565,10 @@ app.post('/api/part/analyze', async (req, res) => {
         issues: c.issues,
         sources: c.sources || [],
       })),
+      learned_memory: learned,
       db_updated_at: KNOWN_ISSUES.updated_at,
     };
 
-    // optional model synthesis (skipped in demo or when model unreachable)
     const cfg = getLlmConfig(req);
     let analysis = null;
     if (!cfg.demo && (cfg.apiKey || !cfg.needsKey)) {
@@ -577,11 +578,12 @@ app.post('/api/part/analyze', async (req, res) => {
           model: cfg.chatModel,
           system: PART_ANALYZER,
           user: JSON.stringify({
-            product: BOM_PRODUCT,
+            product: useBom ? BOM_PRODUCT : '',
             part_name: partName || bomMatch?.part_name_en,
             part_no: partNo || bomMatch?.part_no,
             bom_match: bomMatch,
             known_issue_categories: base.known_issues,
+            learned_memory: learned,
             language: 'fa',
           }),
           temperature: 0.1,
@@ -597,7 +599,7 @@ app.post('/api/part/analyze', async (req, res) => {
   }
 });
 
-// ---- Known-issues refresh: keep the DB up to date via the configured model ----
+// Refresh known issues
 app.post('/api/known-issues/refresh', async (req, res) => {
   try {
     const cfg = getLlmConfig(req);
@@ -609,7 +611,7 @@ app.post('/api/known-issues/refresh', async (req, res) => {
     if (!targets.length) return res.status(404).json({ error: 'category_not_found' });
 
     const results = [];
-    for (const cat of targets.slice(0, 4)) { // cap per call to keep it fast
+    for (const cat of targets.slice(0, 4)) {
       const parsed = await callJson({
         cfg,
         model: cfg.chatModel,
@@ -639,6 +641,7 @@ app.post('/api/known-issues/refresh', async (req, res) => {
   }
 });
 
+// Session start
 app.post('/api/session/start', async (req, res) => {
   try {
     const symptom = (req.body?.symptom || '').toString().trim();
@@ -646,15 +649,17 @@ app.post('/api/session/start', async (req, res) => {
     const cfg = getLlmConfig(req);
     if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
 
-    const language = req.body?.language === 'en' ? 'en' : 'fa';
-    const state = newState(symptom, language);
+    const useBom = req.body?.use_bom !== false;
+    const maxQuestions = Number(req.body?.max_questions) || DEFAULT_MAX_QUESTIONS;
+    const state = newState(symptom, 'fa', useBom, maxQuestions);
     const id = crypto.randomUUID();
     sessions.set(id, state);
 
-    // immediate safety screen (code-level, before any model call)
+    // immediate safety screen
     if (quickSafetyCheck(symptom)) {
       state.phase = 'escalated';
-      return res.json({ sessionId: id, ...escalationPayload(language), state: publicState(state) });
+      saveCase({ id, symptom: state.symptom, system: state.system, findings: [], root_causes: [{ cause: 'ارجاع فوری به دلیل ریسک ایمنی', confidence: 99 }] });
+      return res.json({ sessionId: id, ...escalationPayload('fa'), state: publicState(state) });
     }
 
     const step = await nextStep(cfg, state);
@@ -664,6 +669,7 @@ app.post('/api/session/start', async (req, res) => {
   }
 });
 
+// Session answer
 app.post('/api/session/answer', async (req, res) => {
   try {
     const id = (req.body?.sessionId || '').toString();
@@ -686,10 +692,11 @@ app.post('/api/session/answer', async (req, res) => {
     state.question_count += 1;
     state.pending_question = null;
 
-    // code-level safety screen on free-text answers
+    // safety screen on answers
     if (quickSafetyCheck(finalAnswer)) {
       state.phase = 'escalated';
-      return res.json({ sessionId: id, ...escalationPayload(state.language), state: publicState(state) });
+      saveCase({ id, symptom: state.symptom, system: state.system, findings: state.findings, root_causes: [{ cause: 'ارجاع فوری به دلیل ریسک ایمنی', confidence: 99 }] });
+      return res.json({ sessionId: id, ...escalationPayload('fa'), state: publicState(state) });
     }
 
     const step = await nextStep(cfg, state);
@@ -699,26 +706,93 @@ app.post('/api/session/answer', async (req, res) => {
   }
 });
 
+// Extend question limit (Ask more questions)
+app.post('/api/session/extend', async (req, res) => {
+  try {
+    const id = (req.body?.sessionId || '').toString();
+    const state = sessions.get(id);
+    if (!state) return res.status(404).json({ error: 'session_not_found' });
+
+    const extendBy = Number(req.body?.extend_by) || 4;
+    state.max_questions = (state.max_questions || DEFAULT_MAX_QUESTIONS) + extendBy;
+    state.phase = 'interview';
+
+    const cfg = getLlmConfig(req);
+    const step = await nextStep(cfg, state);
+    return handleStep(res, id, state, step, cfg);
+  } catch (e) {
+    handleError(res, e);
+  }
+});
+
+// Conclude interview on demand
+app.post('/api/session/conclude', async (req, res) => {
+  try {
+    const id = (req.body?.sessionId || '').toString();
+    const state = sessions.get(id);
+    if (!state) return res.status(404).json({ error: 'session_not_found' });
+
+    const cfg = getLlmConfig(req);
+    const report = await finalReport(cfg, state);
+    state.phase = 'concluded';
+
+    saveCase({
+      id,
+      symptom: state.symptom,
+      system: state.system,
+      findings: state.findings,
+      root_causes: report.root_causes,
+    });
+
+    return res.json({
+      sessionId: id,
+      concluded: true,
+      report,
+      savedToDb: true,
+      state: publicState(state),
+    });
+  } catch (e) {
+    handleError(res, e);
+  }
+});
+
 async function handleStep(res, id, state, step, cfg) {
   if (step.escalate) {
     state.phase = 'escalated';
-    return res.json({ sessionId: id, ...escalationPayload(state.language, step.reason), state: publicState(state) });
+    saveCase({ id, symptom: state.symptom, system: state.system, findings: state.findings, root_causes: [{ cause: step.reason || 'ارجاع فوری', confidence: 99 }] });
+    return res.json({ sessionId: id, ...escalationPayload('fa', step.reason), state: publicState(state) });
   }
-  if (step.conclude || state.question_count >= MAX_QUESTIONS) {
+  if (step.conclude || state.question_count >= state.max_questions) {
     applyStateUpdates(state, step);
     const report = await finalReport(cfg, state);
     state.phase = 'concluded';
-    return res.json({ sessionId: id, concluded: true, report, state: publicState(state) });
+
+    // Auto-save to database for learning
+    saveCase({
+      id,
+      symptom: state.symptom,
+      system: state.system,
+      findings: state.findings,
+      root_causes: report.root_causes,
+    });
+
+    return res.json({
+      sessionId: id,
+      concluded: true,
+      report,
+      savedToDb: true,
+      state: publicState(state),
+    });
   }
   applyStateUpdates(state, step);
-  const options = ensureFallbackOption(step.options, state.language);
+  const options = ensureFallbackOption(step.options, 'fa');
   state.pending_question = { question: step.question, options };
   return res.json({
     sessionId: id,
     question: step.question,
     options,
     questionNumber: state.question_count + 1,
-    maxQuestions: MAX_QUESTIONS,
+    maxQuestions: state.max_questions,
     state: publicState(state),
   });
 }
@@ -728,10 +802,13 @@ function publicState(state) {
     symptom: state.symptom,
     system: state.system,
     language: state.language,
+    use_bom: state.use_bom,
+    max_questions: state.max_questions,
+    learned_memory: state.learned_memory,
     question_count: state.question_count,
     leading_hypotheses: state.leading_hypotheses,
     ruled_out: state.ruled_out,
-    bom_parts: bomPartsForModel(state.system),
+    bom_parts: state.use_bom ? bomPartsForModel(state.system) : [],
     phase: state.phase,
   };
 }
@@ -745,7 +822,7 @@ function handleError(res, e) {
     return res.status(402).json({ error: 'insufficient_balance', detail: e.message });
   }
   if (/fetch failed/i.test(e.message || '')) {
-    return res.status(502).json({ error: 'network_error', detail: 'Cannot reach the model server (DeepSeek API or local endpoint). Check network/base URL, make sure the local server (e.g. Ollama) is running, or use the key "demo" for demo mode.' });
+    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل هوش مصنوعی (DeepSeek یا سرور لوکال) برقرار نشد. آدرس و شبکه را بررسی کنید یا از حالت دمو استفاده نمایید.' });
   }
   return res.status(500).json({ error: 'server_error', detail: e.message });
 }
