@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-پل وب DeepSeek — حالت کاملاً مخفی (Headless) + ورود خودکار
-============================================================
-این سرویس مرورگر را در پس‌زمینه (کاملاً مخفی و بدون باز شدن پنجره) باز می‌کند،
-به صورت خودکار با اطلاعات داده‌شده لاگین می‌کند، سوالات را دریافت کرده و
-پاسخ را به اپ تحویل می‌دهد.
+پل وب DeepSeek — حالت پنجره نمایان (Visible GUI) + ورود خودکار
+===============================================================
+این سرویس پنجره مرورگر کروم را باز می‌کند (کاملاً قابل مشاهده)،
+با اطلاعات کاربری وارد حساب می‌شود، سوالات را تایپ کرده و
+پاسخ دریافتی را به اپلیکیشن عیب‌یابی تحویل می‌دهد.
 
 آدرس برای اپ:  http://localhost:8765/v1
 در اپ: ⚙️ تنظیمات مدل → 🌐 مرورگر کروم (پل سلنیومی)
@@ -32,10 +32,12 @@ CHAT_URL = "https://chat.deepseek.com/"
 PROFILE_DIR = os.path.join(os.path.expanduser("~"), ".deepseek_web_profile")
 ANSWER_TIMEOUT = int(os.environ.get("ANSWER_TIMEOUT", "300"))  # ثانیه
 
-# اطلاعات ورود (پیش‌فرض یا از متغیرهای محیطی)
+# اطلاعات ورود
 DEEPSEEK_EMAIL = os.environ.get("DEEPSEEK_EMAIL", "Abraham.Hassanloo689@gmail.com")
 DEEPSEEK_PASSWORD = os.environ.get("DEEPSEEK_PASSWORD", "hsshhsj79")
-HEADLESS_MODE = os.environ.get("HEADLESS", "1").strip().lower() not in ("0", "false", "no")
+
+# حالت نمایش پنجره (پیش‌فرض: 0 یعنی پنجره باز و نمایان باشد)
+HEADLESS_MODE = os.environ.get("HEADLESS", "0").strip().lower() in ("1", "true", "yes")
 
 app = Flask(__name__)
 _lock = threading.Lock()   # هم‌زمان فقط یک سوال
@@ -75,7 +77,7 @@ def find_local_driver():
 
 
 def _setup_options(is_chrome=True):
-    """تنظیمات مرورگر شامل حالت مخفی و جلوگیری از تشخیص بات"""
+    """تنظیمات مرورگر"""
     if is_chrome:
         opts = webdriver.ChromeOptions()
     else:
@@ -87,7 +89,6 @@ def _setup_options(is_chrome=True):
     opts.add_experimental_option("useAutomationExtension", False)
 
     if HEADLESS_MODE:
-        # حالت کاملاً مخفی و نامرئی در پس‌زمینه
         opts.add_argument("--headless=new")
         opts.add_argument("--window-size=1920,1080")
         opts.add_argument("--disable-gpu")
@@ -102,21 +103,22 @@ def _setup_options(is_chrome=True):
 
 
 def _auto_login(d):
-    """ورود خودکار به DeepSeek با ایمیل و پسورد در صورت نیاز"""
+    """ورود خودکار به DeepSeek با ایمیل و پسورد"""
     try:
-        # ۱. بررسی اینکه آیا از قبل لاگین هستیم یا نه
+        print("🔍 در حال بررسی وضعیت ورود (لاگین)...")
         time.sleep(2)
+        # ۱. بررسی اینکه آیا از قبل لاگین هستیم
         for sel in ("textarea#chat-input", "textarea", "div[contenteditable='true']"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
             for el in els:
                 if el.is_displayed():
-                    # لاگین است
+                    print("✅ حساب از قبل وارد شده و نشست فعال است!")
                     return True
 
         # ۲. بررسی وجود فرم لاگین
-        print(f"🔐 در حال ورود خودکار با حساب: {DEEPSEEK_EMAIL} ...")
+        print(f"🔐 شروع فرآیند ورود با ایمیل: {DEEPSEEK_EMAIL}")
 
-        # در صورت وجود تب رمز عبور یا ورود با ایمیل
+        # تب رمز عبور یا ورود با ایمیل
         tab_selectors = [
             "//div[contains(text(), 'Password') or contains(text(), 'رمز') or contains(text(), 'Log in with password')]",
             "//button[contains(text(), 'Password') or contains(text(), 'Log in')]",
@@ -127,6 +129,7 @@ def _auto_login(d):
                 tabs = d.find_elements(By.XPATH, xpath)
                 for tab in tabs:
                     if tab.is_displayed():
+                        print("👉 انتخاب تب ورود با رمز عبور...")
                         tab.click()
                         time.sleep(0.5)
                         break
@@ -142,9 +145,10 @@ def _auto_login(d):
                 break
 
         if email_box:
+            print("✍️ تایپ ایمیل...")
             email_box.clear()
             email_box.send_keys(DEEPSEEK_EMAIL)
-            time.sleep(0.3)
+            time.sleep(0.4)
 
         # ۴. وارد کردن پسورد
         pass_inputs = d.find_elements(By.CSS_SELECTOR, "input[type='password']")
@@ -155,17 +159,19 @@ def _auto_login(d):
                 break
 
         if pass_box:
+            print("✍️ تایپ رمز عبور...")
             pass_box.clear()
             pass_box.send_keys(DEEPSEEK_PASSWORD)
-            time.sleep(0.3)
+            time.sleep(0.4)
 
-        # ۵. تیک زدن قوانین و شرایط (Terms of service) در صورت وجود
+        # ۵. تیک زدن قوانین و شرایط
         checkboxes = d.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], .ds-checkbox, span[class*='checkbox'], div[class*='checkbox']")
         for cb in checkboxes:
             try:
                 if cb.is_displayed():
+                    print("☑️ تایید قوانین و شرایط...")
                     d.execute_script("arguments[0].click();", cb)
-                    time.sleep(0.2)
+                    time.sleep(0.3)
             except Exception:
                 pass
 
@@ -185,6 +191,7 @@ def _auto_login(d):
                     btns = d.find_elements(By.CSS_SELECTOR, sel)
                 for btn in btns:
                     if btn.is_displayed() and btn.is_enabled():
+                        print("🖱️ کلیک روی دکمه ورود...")
                         d.execute_script("arguments[0].click();", btn)
                         clicked = True
                         break
@@ -193,20 +200,20 @@ def _auto_login(d):
             except Exception:
                 pass
 
-        # ۷. صبر برای ورود و لود شدن چت
-        print("⏳ منتظر تایید ورود...")
-        deadline = time.time() + 20
+        # ۷. صبر برای ورود و لود شدن صفحه اصلی چت
+        print("⏳ منتظر تایید و ورود به صفحه اصلی چت...")
+        deadline = time.time() + 25
         while time.time() < deadline:
             time.sleep(1.5)
             for sel in ("textarea#chat-input", "textarea", "div[contenteditable='true']"):
                 els = d.find_elements(By.CSS_SELECTOR, sel)
                 for el in els:
                     if el.is_displayed():
-                        print("✅ ورود خودکار با موفقیت انجام شد و نشست ذخیره گردید!")
+                        print("🎉 ورود با موفقیت انجام شد!")
                         return True
 
     except Exception as e:
-        print(f"⚠️ وضعیت ورود خودکار: {e}")
+        print(f"⚠️ پیام ورود: {e}")
 
     return False
 
@@ -222,8 +229,8 @@ def get_driver():
             _driver = None
 
     driver_type, driver_path = find_local_driver()
-    mode_text = "مخفی (Headless)" if HEADLESS_MODE else "نمایان"
-    print(f"🚀 در حال راه‌اندازی مرورگر در حالت {mode_text}...")
+    mode_text = "مخفی (Headless)" if HEADLESS_MODE else "نمایان (Visible Window)"
+    print(f"🚀 در حال باز کردن پنجره مرورگر ({mode_text})...")
 
     # ۱. اگر درایور محلی پیدا شد
     if driver_path:
@@ -241,10 +248,10 @@ def get_driver():
 
             _driver.get(CHAT_URL)
             _auto_login(_driver)
-            print("🌐 مرورگر آماده به کار است.")
+            print("🌐 مرورگر آماده به کار است. پنجره را نبندید.")
             return _driver
         except Exception as e:
-            print(f"⚠️ استفاده از درایور محلی با خطا مواجه شد: {e}")
+            print(f"⚠️ خطا در باز کردن مرورگر: {e}")
 
     # ۲. تلاش عادی خودکار
     try:
@@ -252,7 +259,7 @@ def get_driver():
         _driver = webdriver.Chrome(options=opts)
         _driver.get(CHAT_URL)
         _auto_login(_driver)
-        print("🌐 مرورگر آماده به کار است.")
+        print("🌐 مرورگر آماده به کار است. پنجره را نبندید.")
         return _driver
     except Exception as chrome_err:
         # ۳. تلاش با Edge در ویندوز
@@ -272,7 +279,7 @@ def get_driver():
 
 
 def _find_input(d, timeout=60):
-    """پیدا کردن جعبه تایپ چت (چند حالت مختلف را امتحان می‌کند)"""
+    """پیدا کردن جعبه تایپ چت"""
     def probe(_):
         for sel in ("textarea#chat-input", "textarea", "div[contenteditable='true']"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
@@ -294,11 +301,12 @@ def _messages_text(d):
 
 def ask_deepseek(prompt: str) -> str:
     d = get_driver()
-    d.get(CHAT_URL)  # هر سوال در یک چت تازه (بدون آلودگی زمینه قبلی)
+    print("📩 در حال ارسال پرامپت به سایت DeepSeek...")
+    d.get(CHAT_URL)  # هر سوال در یک چت تازه
     box = _find_input(d)
     before = len(_messages_text(d))
 
-    # تزریق متن (سازگار با React) و ارسال
+    # تزریق متن و ارسال
     d.execute_script(
         """
         const el = arguments[0], text = arguments[1];
@@ -316,8 +324,8 @@ def ask_deepseek(prompt: str) -> str:
     )
     time.sleep(0.5)
     box.send_keys(Keys.ENTER)
+    print("⏳ منتظر دریافت کامل پاسخ از DeepSeek...")
 
-    # صبر تا پاسخ کامل شود: متن آخرین پیام ۳ بار پشت سر هم بدون تغییر بماند
     deadline = time.time() + ANSWER_TIMEOUT
     last, stable = "", 0
     while time.time() < deadline:
@@ -327,11 +335,13 @@ def ask_deepseek(prompt: str) -> str:
         if cur and cur == last:
             stable += 1
             if stable >= 3:
+                print("📥 پاسخ با موفقیت دریافت و به اپلیکیشن تحویل داده شد.")
                 return cur
         else:
             stable = 0
             last = cur
     if last:
+        print("📥 پاسخ دریافت شد.")
         return last
     raise TimeoutError("پاسخی از سایت دریافت نشد (تایم‌اوت). لطفا اتصال اینترنت را بررسی کنید.")
 
@@ -377,14 +387,14 @@ def chat_completions():
 
 if __name__ == "__main__":
     print("=" * 65)
-    print("  🌉 پل وب DeepSeek (حالت مخفی / نامرئی + ورود خودکار)")
-    print(f"  حالت اجرا:     {'مخفی در پس‌زمینه (Headless)' if HEADLESS_MODE else 'نمایش پنجره'}")
+    print("  🌉 پل وب DeepSeek (پنجره باز و نمایان + ورود خودکار)")
+    print(f"  حالت:          {'مخفی (Headless)' if HEADLESS_MODE else 'پنجره نمایان و بزرگ'}")
     print(f"  ایمیل لاگین:   {DEEPSEEK_EMAIL}")
     print(f"  آدرس برای اپ:  http://localhost:{PORT}/v1")
     print("  در اپ: ⚙️ تنظیمات مدل → 🌐 مرورگر کروم (پل سلنیومی)")
     print("=" * 65)
     try:
-        get_driver()  # مرورگر در پس‌زمینه اجرا و لاگین خودکار انجام می‌شود
+        get_driver()
     except Exception as e:
         print(f"\n⚠️ خطا در راه‌اندازی مرورگر: {e}")
         if os.name == "nt":
