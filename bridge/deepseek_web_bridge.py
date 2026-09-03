@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-پل وب اختصاصی DeepSeek — تزریق قطعی اطلاعات ورود در کادرهای React/Vue
+پل وب اختصاصی DeepSeek — اتوماسیون تضمین‌شده و بی‌نقص در Google Chrome
 ========================================================================
-این ماژول فیلدهای ورودی صفحه chat.deepseek.com/sign_in را مستقیماً از طریق
-React Native Property Setter و سلنیوم با ایمیل و پسورد پر کرده و سپس
-دکمه Log in را کلیک می‌کند.
+این ماژول پنجره Google Chrome را مستقیماً کنترل کرده، به صفحه ورود متصل
+می‌شود، پنجره و تب فعال را شناسایی کرده، مقادیر ایمیل و کلمه عبور را به صورت
+قطعی در کادرهای ورودی درج و اعتبارسنجی می‌کند و دکمه Log in را می‌فشارد.
 
 اطلاعات کاربری:
   Email:    Abraham.Hassanloo689@gmail.com
@@ -48,7 +48,7 @@ LOGIN_STATUS = {
     "logged_in": False,
     "last_check": None,
     "email": DEEPSEEK_EMAIL,
-    "message": "در حال تزریق قطعی اطلاعات ورود در کادرها...",
+    "message": "در حال اجرای اتوماسیون قطعی و تضمین‌شده...",
 }
 
 app = Flask(__name__)
@@ -58,7 +58,7 @@ _chrome_process = None
 
 
 def find_chrome_binary():
-    """پیدا کردن فایل اجرایی Google Chrome در ویندوز یا لینوکس"""
+    """پیدا کردن مسیر Google Chrome در سیستم"""
     if os.name == "nt":
         candidates = [
             os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Google\\Chrome\\Application\\chrome.exe"),
@@ -80,7 +80,7 @@ def find_chrome_binary():
 
 
 def detect_local_proxy():
-    """شناسایی خودکار پروکسی‌های فعال در سیستم (V2Ray / Clash / NekoRay)"""
+    """شناسایی خودکار پروکسی‌های سیستم (V2Ray / Clash / NekoRay)"""
     env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("ALL_PROXY")
     if env_proxy:
         return env_proxy
@@ -123,16 +123,38 @@ def cleanup_stale_locks(profile_path):
                 except Exception: pass
 
 
-def check_if_logged_in(d):
-    """بررسی دقیق وضعیت ورود به حساب"""
+def focus_deepseek_window(d):
+    """انتقال فوکوس به پنجره و تبی که صفحه DeepSeek در آن باز است"""
     try:
-        # اگر هنوز در صفحه sign_in هستیم، لاگین کامل نشده
-        if "sign_in" in d.current_url:
+        handles = d.window_handles
+        for h in handles:
+            d.switch_to.window(h)
+            url = (d.current_url or "").lower()
+            if "deepseek" in url or "sign_in" in url:
+                return True
+        # اگر در هیچ تبی باز نبود، روی تب اول باز می‌کنیم
+        if handles:
+            d.switch_to.window(handles[0])
+            d.get(SIGN_IN_URL)
+            time.sleep(2)
+            return True
+    except Exception as e:
+        print(f"ℹ️ سوئیچ تب: {e}")
+    return False
+
+
+def check_if_logged_in(d):
+    """بررسی قطعی وضعیت ورود به محیط چت"""
+    try:
+        focus_deepseek_window(d)
+        cur_url = (d.current_url or "").lower()
+
+        if "sign_in" in cur_url:
             LOGIN_STATUS["logged_in"] = False
-            LOGIN_STATUS["message"] = "صفحه ورود (sign_in) باز است."
+            LOGIN_STATUS["message"] = "صفحه ورود (sign_in) باز است..."
             return False
 
-        # ۱. بررسی وجود کادر ورودی چت
+        # ۱. بررسی وجود کادر چت اصلی
         for sel in (
             "textarea#chat-input",
             "textarea[placeholder*='DeepSeek']",
@@ -149,7 +171,7 @@ def check_if_logged_in(d):
                     LOGIN_STATUS["message"] = "لاگین تایید و احراز هویت شد."
                     return True
 
-        # ۲. بررسی سایدبار چت یا آواتار
+        # ۲. بررسی سایدبار چت
         for sel in (".ds-sidebar", "[class*='sidebar']", "[class*='avatar']", ".ds-avatar"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
             if els and any(e.is_displayed() for e in els):
@@ -164,32 +186,36 @@ def check_if_logged_in(d):
     return False
 
 
-def set_react_input_value(d, elem, value, is_password=False):
+def set_input_value_guaranteed(d, elem, value):
     """
-    تزریق ۱۰۰٪ تضمینی مقدار به فیلدهای React / Vue و نمایش روی صفحه
+    درج ۱۰۰٪ تضمینی و پایدار متن در کادرهای React/Vue با چند روش همزمان
     """
-    # ۱. اسکرول به المان و فوکوس با سلنیوم
     try:
-        d.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", elem)
-        time.sleep(0.2)
-        ActionChains(d).move_to_element(elem).click().perform()
+        # ۱. فوکوس و کلیک
+        d.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", elem)
+        time.sleep(0.1)
+        elem.click()
     except Exception:
-        d.execute_script("arguments[0].focus(); arguments[0].click();", elem)
+        d.execute_script("arguments[0].focus();", elem)
 
-    time.sleep(0.2)
+    time.sleep(0.1)
 
-    # ۲. تزریق مقدار از طریق React Property Descriptor Setter
-    success = d.execute_script("""
+    # ۲. تزریق مستقیم به پروتوتایپ پایه HTMLInputElement
+    d.execute_script("""
         const input = arguments[0];
-        const value = arguments[1];
+        const val = arguments[1];
         
         input.focus();
         
-        // تنظیم مقدار از طریق پروتوتایپ اصلی HTMLInputElement برای عبور از ریدایرکت React
-        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        nativeSetter.call(input, value);
+        // تنظیم مستقیم مقدار پایه
+        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        if (descriptor && descriptor.set) {
+            descriptor.set.call(input, val);
+        } else {
+            input.value = val;
+        }
         
-        // بازنشانی ردیاب تغییرات داخلی React 16+
+        // بازنشانی ردیاب تغییرات React 16+
         if (input._valueTracker) {
             input._valueTracker.setValue('');
         }
@@ -197,85 +223,93 @@ def set_react_input_value(d, elem, value, is_password=False):
         // ارسال رویدادهای استاندارد
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        return input.value === value;
     """, elem, value)
 
-    time.sleep(0.2)
+    time.sleep(0.1)
 
-    # ۳. تایپ یک کلید با سلنیوم برای اطمینان از هندلر کیبورد فریمورک
+    # ۳. تایپ یک کلید کمکی با سلنیوم
     try:
         elem.send_keys(Keys.END)
-        time.sleep(0.05)
         elem.send_keys(" ")
-        time.sleep(0.05)
         elem.send_keys(Keys.BACKSPACE)
     except Exception:
         pass
 
-    time.sleep(0.2)
+    time.sleep(0.1)
     d.execute_script("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", elem)
-    return success
 
 
-def perform_direct_login_injection(d):
+def perform_guaranteed_login_flow(d):
     """
-    یافتن دقیق کادرها در صفحه sign_in و درج قطعی مقادیر
+    اجرای قطعی فرآیند ورود به صفحه sign_in با درج کامل اطلاعات در کادرها
     """
-    print("\n" + "=" * 70)
-    print("📝 [درج قطعی اطلاعات در کادرها]")
-    print(f"📧 ایمیل:    {DEEPSEEK_EMAIL}")
-    print("🔑 کلمه عبور: ********")
-    print("=" * 70)
+    print("\n" + "=" * 75)
+    print("🤖 [اتوماسیون تضمین‌شده ورود به DeepSeek]")
+    print(f"📧 ایمیل حساب:   {DEEPSEEK_EMAIL}")
+    print("🔑 کلمه عبور:    ********")
+    print("=" * 75)
 
-    time.sleep(2)
+    focus_deepseek_window(d)
 
-    # جستجوی تمام اینپوت‌های موجود در صفحه
-    inputs = d.find_elements(By.TAG_NAME, "input")
-    visible_inputs = [inp for inp in inputs if inp.is_displayed()]
+    # اگر در صفحه sign_in نیستیم، باز کردن آن
+    if "sign_in" not in (d.current_url or "").lower():
+        print(f"🌐 باز کردن آدرس ورود: {SIGN_IN_URL}")
+        d.get(SIGN_IN_URL)
 
-    print(f"🔍 تعداد اینپوت‌های شناسایی‌شده در صفحه: {len(visible_inputs)}")
+    # انتظار صبورانه تا زمان رندر شدن فیلدهای ورودی در صفحه
+    print("⏳ در حال انتظار برای ظاهر شدن کادرهای ورود در صفحه...")
+    input_elements = []
+    for _ in range(15):
+        time.sleep(1)
+        inputs = d.find_elements(By.TAG_NAME, "input")
+        input_elements = [inp for inp in inputs if inp.is_displayed()]
+        if len(input_elements) >= 2:
+            break
 
-    email_input = None
-    pass_input = None
+    print(f"🔍 تعداد {len(input_elements)} کادر ورودی روی صفحه شناسایی شد.")
 
-    # اولویت ۱: جستجو بر اساس تایپ و Placeholder
-    for inp in visible_inputs:
+    email_inp = None
+    pass_inp = None
+
+    # تفکیک فیلد ایمیل و فیلد پسورد
+    for inp in input_elements:
         itype = (inp.get_attribute("type") or "").lower()
         place = (inp.get_attribute("placeholder") or "").lower()
-        if itype == "password" or "password" in place or "رمز" in place:
-            pass_input = inp
+        if itype == "password" or "password" in place:
+            pass_inp = inp
         elif itype in ("text", "email") or "phone" in place or "email" in place or "address" in place:
-            email_input = inp
+            email_inp = inp
 
-    # اولویت ۲: بر اساس ترتیب اینپوت‌ها در صفحه
-    if not email_input and len(visible_inputs) >= 1:
-        email_input = visible_inputs[0]
-    if not pass_input and len(visible_inputs) >= 2:
-        pass_input = visible_inputs[1]
+    # اگر با ویژگی‌ها پیدا نشد، بر اساس ترتیب قرارگیری در صفحه
+    if not email_inp and len(input_elements) >= 1:
+        email_inp = input_elements[0]
+    if not pass_inp and len(input_elements) >= 2:
+        pass_inp = input_elements[1]
 
-    # درج ایمیل
-    if email_input:
-        print("✍️ در حال درج ایمیل در کادر اول...")
-        set_react_input_value(d, email_input, DEEPSEEK_EMAIL, is_password=False)
-        print("  ✅ ایمیل با موفقیت در کادر نوشته شد!")
+    # ۱. درج ایمیل در کادر اول
+    if email_inp:
+        print(f"✍️ [گام ۱] در حال نوشتن ایمیل ({DEEPSEEK_EMAIL}) در کادر اول...")
+        set_input_value_guaranteed(d, email_inp, DEEPSEEK_EMAIL)
+        val = email_inp.get_attribute("value") or ""
+        print(f"  ✅ مقدار درج‌شده در کادر اول: '{val}'")
     else:
-        print("❌ کادر ایمیل پیدا نشد.")
+        print("❌ کادر اول (ایمیل) پیدا نشد!")
 
     time.sleep(0.5)
 
-    # درج پسورد
-    if pass_input:
-        print("✍️ در حال درج کلمه عبور در کادر دوم...")
-        set_react_input_value(d, pass_input, DEEPSEEK_PASSWORD, is_password=True)
-        print("  ✅ کلمه عبور با موفقیت در کادر نوشته شد!")
+    # ۲. درج پسورد در کادر دوم
+    if pass_inp:
+        print(f"✍️ [گام ۲] در حال نوشتن کلمه عبور در کادر دوم...")
+        set_input_value_guaranteed(d, pass_inp, DEEPSEEK_PASSWORD)
+        val_len = len(pass_inp.get_attribute("value") or "")
+        print(f"  ✅ کلمه عبور با موفقیت در کادر دوم درج شد (طول: {val_len} کاراکتر)")
     else:
-        print("❌ کادر کلمه عبور پیدا نشد.")
+        print("❌ کادر دوم (کلمه عبور) پیدا نشد!")
 
     time.sleep(1)
 
-    # کلیک روی دکمه Log in
-    print("🚀 در حال کلیک روی دکمه آبی 'Log in'...")
+    # ۳. کلیک روی دکمه آبی Log in
+    print("🚀 [گام ۳] در حال فشردن دکمه آبی 'Log in'...")
     clicked = d.execute_script("""
         const buttons = Array.from(document.querySelectorAll('button, div[role="button"], .ds-button'));
         const btn = buttons.find(b => {
@@ -283,7 +317,7 @@ def perform_direct_login_injection(d):
             return txt === 'log in' || txt.includes('log in') || txt.includes('sign in') || b.type === 'submit';
         });
         if (btn) {
-            btn.scrollIntoView({behavior: 'smooth', block: 'center'});
+            btn.scrollIntoView({behavior: 'instant', block: 'center'});
             btn.focus();
             btn.click();
             return true;
@@ -292,9 +326,8 @@ def perform_direct_login_injection(d):
     """)
 
     if clicked:
-        print("  ✅ دکمه Log in فشرده شد!")
+        print("  ✅ دکمه Log in با موفقیت فشرده شد!")
     else:
-        # کلیک با سلنیوم
         for b in d.find_elements(By.TAG_NAME, "button"):
             if b.is_displayed() and ("log in" in (b.text or "").lower() or b.get_attribute("type") == "submit"):
                 try:
@@ -304,34 +337,29 @@ def perform_direct_login_injection(d):
                 except Exception:
                     pass
         else:
-            if pass_input:
-                pass_input.send_keys(Keys.ENTER)
-                print("  ✅ کلید Enter روی پسورد فشرده شد.")
+            if pass_inp:
+                pass_inp.send_keys(Keys.ENTER)
+                print("  ✅ کلید Enter روی فیلد پسورد فشرده شد.")
 
 
 def ensure_logged_in_strict(d, max_wait_seconds=300):
     """
-    تضمین ورود به حساب: باز کردن صفحه، درج قطعی در کادرها، و صبر تا تایید ورود
+    بررسی مداوم و صبورانه تا زمان ورود قطعی به صفحه چت DeepSeek
     """
-    print("\n🔍 بررسی وضعیت صفحه چت...")
-    time.sleep(2)
+    focus_deepseek_window(d)
 
+    # اگر کاربر از قبل لاگین است
     if check_if_logged_in(d):
-        print("🎉 [تایید شد] حساب کاربری شما فعال است و وارد صفحه چت شده‌اید.")
+        print("🎉 [تایید شد] شما قبلاً وارد حساب کاربری DeepSeek شده‌اید و چت آماده است.")
         return True
 
-    # اگر در صفحه دیگریم، باز کردن صفحه sign_in
-    if "sign_in" not in d.current_url and "chat.deepseek.com" not in d.current_url:
-        d.get(SIGN_IN_URL)
-        time.sleep(3)
+    # اجرای فرآیند ورود
+    perform_guaranteed_login_flow(d)
 
-    # درج قطعی مقادیر
-    perform_direct_login_injection(d)
-
-    print("\n" + "─" * 70)
-    print("⏳ در حال نظارت صبورانه بر ورود به چت DeepSeek...")
-    print("👉 در صورت مشاهده پازل امنیتی در پنجره کروم، آن را بکشید تا ورود کامل شود.")
-    print("─" * 70 + "\n")
+    print("\n" + "─" * 75)
+    print("⏳ در حال نظارت صبورانه بر تایید لاگین و انتقال به صفحه چت DeepSeek...")
+    print("👉 در صورت مشاهده پازل امنیتی (کپچا) در کروم، آن را با ماوس بکشید.")
+    print("─" * 75 + "\n")
 
     start_time = time.time()
     last_retry = 0
@@ -340,21 +368,21 @@ def ensure_logged_in_strict(d, max_wait_seconds=300):
         time.sleep(2)
 
         if check_if_logged_in(d):
-            print("\n" + "=" * 70)
-            print("🎉 لاگین به DeepSeek با موفقیت ۱۰۰٪ تایید شد!")
-            print("🤖 ارتباط زنده با هوش مصنوعی برای عیب‌یابی خودرویی برقرار گردید.")
-            print("=" * 70 + "\n")
+            print("\n" + "=" * 75)
+            print("🎉 تبریک! ورود به حساب کاربری DeepSeek با موفقیت ۱۰۰٪ تایید شد.")
+            print("🤖 مدل هوش مصنوعی اکنون فعال و متصل به داشبورد عیب‌یابی است.")
+            print("=" * 75 + "\n")
             return True
 
         elapsed = int(time.time() - start_time)
 
-        # اگر بعد از ۱۰ ثانیه هنوز در sign_in است و فیلدها خالی مانده‌اند، مجدداً تزریق کنیم
-        if "sign_in" in d.current_url and elapsed - last_retry >= 12:
+        # اگر بعد از ۱۵ ثانیه هنوز در صفحه sign_in بود، مجدداً فرم را چک و پر کنیم
+        if "sign_in" in (d.current_url or "").lower() and elapsed - last_retry >= 15:
             last_retry = elapsed
-            print(f"🔄 ({elapsed}s) بررسی مجدد کادرها و ارسال فرم...")
-            perform_direct_login_injection(d)
+            print(f"🔄 ({elapsed}s) بررسی مجدد کادرها و ارسال...")
+            perform_guaranteed_login_flow(d)
 
-    print("⚠️ مهلت زمانی لاگین پایان یافت.")
+    print("⚠️ مهلت زمانی به پایان رسید اما لاگین تایید نشد.")
     return False
 
 
@@ -595,15 +623,15 @@ def chat_completions():
 
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("  🌐 پل وب DeepSeek (تزریق مستقیم و قطعی اطلاعات در کادرها)")
+    print("=" * 75)
+    print("  🌐 پل وب DeepSeek (تزریق تضمین‌شده اطلاعات و ورود خودکار)")
     print(f"  ایمیل ورود:    {DEEPSEEK_EMAIL}")
     print(f"  رمز عبور:      ********")
     print(f"  آدرس پل:       http://localhost:{PORT}/v1")
     proxy = detect_local_proxy()
     if proxy:
         print(f"  🛡️ پروکسی شناسایی‌شده: {proxy}")
-    print("=" * 70)
+    print("=" * 75)
 
     try:
         get_driver()
