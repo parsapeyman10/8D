@@ -1,32 +1,26 @@
 @echo off
-REM اجرای دستیار عیب‌یابی و گزارش 8D (ویندوز - اجرای مستقیم در Google Chrome)
+REM اجرای یکپارچه دستیار عیب‌یابی و گزارش 8D (ویندوز - وب‌درایور Google Chrome)
 setlocal
-set SE_OFFLINE=true
-set LLM_PROVIDER=gemini
-set GEMINI_MODEL=gemini-1.5-flash
-cd /d "%~dp0"
+chcp 65001 >nul
+cd /d "%~dp0\.."
 
-where node >nul 2>nul
-if errorlevel 1 (
-  echo [!] Node.js نصب نیست. لطفا از https://nodejs.org نسخه LTS را نصب کنید.
-  pause
-  exit /b 1
+where python >nul 2>nul
+if not errorlevel 1 (
+  python run.py
+  goto :eof
 )
 
+where py >nul 2>nul
+if not errorlevel 1 (
+  py run.py
+  goto :eof
+)
+
+echo [!] پایتون یافت نشد. اجرای مستقیم سرور Node.js...
+cd /d "%~dp0"
 if not exist node_modules (
-  echo [*] در حال نصب وابستگی‌های Node.js...
   call npm install
 )
 
-echo [*] در حال باز کردن برنامه در مرورگر Google Chrome...
-if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
-  start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" http://localhost:3000
-) else if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" (
-  start "" "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" http://localhost:3000
-) else if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" (
-  start "" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" http://localhost:3000
-) else (
-  start http://localhost:3000
-)
-
+start http://localhost:3000
 npm start

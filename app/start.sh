@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# اجرای دستیار عیب‌یابی و گزارش 8D با Google Gemini 1.5 Flash (لینوکس / مک)
-cd "$(dirname "$0")"
-export SE_OFFLINE=true
-export LLM_PROVIDER=gemini
-export GEMINI_MODEL=gemini-1.5-flash
+# اجرای یکپارچه دستیار عیب‌یابی و گزارش 8D
+cd "$(dirname "$0")/.."
 
-if ! command -v node >/dev/null; then
-  echo "[!] Node.js نصب نیست. از https://nodejs.org نسخه LTS را نصب کنید."
-  exit 1
+if command -v python3 >/dev/null 2>&1; then
+  python3 run.py
+elif command -v python >/dev/null 2>&1; then
+  python run.py
+else
+  cd app
+  [ -d node_modules ] || npm install
+  npm start
 fi
-
-[ -d node_modules ] || { echo "[*] در حال نصب وابستگی‌ها..."; npm install; }
-echo "[*] در حال اجرای برنامه روی http://localhost:3000 با مدل Google Gemini (gemini-1.5-flash)..."
-npm start

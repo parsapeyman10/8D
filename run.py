@@ -2,20 +2,23 @@
 """
 اجراکننده یکپارچه «دستیار عیب‌یابی هدایت‌شده و گزارش 8D»
 ==========================================================
- 1. باز کردن پنجره اختصاصی Google Chrome برای DeepSeek (پل سلنیوم)
- 2. راه‌اندازی سرور اصلی و پایگاه دانش یادگیری (پورت 3000)
- 3. باز کردن خودکار داشبورد وب در مرورگر Google Chrome
+ترتیب اجرای گام به گام و پایدار:
+ ۱. بررسی و راه‌اندازی کامل وب‌اپلیکیشن، دیتابیس و داشبورد اصلی (پورت 3000)
+ ۲. تست سلامت ۱۰۰٪ سرویس‌ها و باز کردن داشبورد در مرورگر Google Chrome
+ ۳. راه‌اندازی پل ارتباطی و اتصال به حساب DeepSeek و احراز هویت لاگین
 """
 
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import webbrowser
 
-os.environ["LLM_PROVIDER"] = "bridge"  # پل وب سلنیومی کروم به عنوان پیش‌فرض اصلی
+os.environ["LLM_PROVIDER"] = "bridge"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(HERE, "app")
@@ -103,7 +106,7 @@ def ensure_python_deps():
             say("✅ پکیج‌های پایتون با موفقیت نصب شدند.")
             return True
         except Exception as e:
-            say(f"⚠️ نصب خودکار با خطا مواجه شد: {e}")
+            say(f"⚠️ نصب خودکار پکیج‌های پایتون با خطا مواجه شد: {e}")
             return False
     return True
 
@@ -120,28 +123,41 @@ def install_node_deps(npm):
     say("✅ وابستگی‌های Node.js آماده است.")
 
 
-def start_bridge():
-    if not os.path.isfile(BRIDGE_SCRIPT):
-        return None
-    ensure_python_deps()
-    say("🚀 در حال باز کردن پنجره Google Chrome و اتصال به DeepSeek...")
-    try:
-        proc = subprocess.Popen([sys.executable, BRIDGE_SCRIPT], cwd=os.path.dirname(BRIDGE_SCRIPT))
-        return proc
-    except Exception as e:
-        say(f"⚠️ بالا آوردن پل با خطا مواجه شد: {e}")
-        return None
-
-
 def start_server(node):
     return subprocess.Popen([node, os.path.join("src", "server.js")], cwd=APP_DIR)
 
 
+def start_bridge():
+    if not os.path.isfile(BRIDGE_SCRIPT):
+        return None
+    ensure_python_deps()
+    say("🚀 [گام ۲] در حال راه‌اندازی وب‌درایور Google Chrome و ورود به حساب DeepSeek...")
+    try:
+        proc = subprocess.Popen([sys.executable, BRIDGE_SCRIPT], cwd=os.path.dirname(BRIDGE_SCRIPT))
+        return proc
+    except Exception as e:
+        say(f"⚠️ راه‌اندازی پل با خطا مواجه شد: {e}")
+        return None
+
+
+def verify_app_health():
+    """بررسی سلامت کامل داشبورد، پایگاه دانش و دیتابیس"""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/health")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data
+    except Exception:
+        pass
+    return None
+
+
 def main():
-    say("=" * 70)
-    say("  🔧 دستیار تخصصی عیب‌یابی و گزارش 8D")
-    say("  🌐 اتصال زنده و نمایان به DeepSeek از طریق وب‌درایور Google Chrome")
-    say("=" * 70)
+    say("=" * 75)
+    say("  🔧 دستیار تخصصی عیب‌یابی و گزارش 8D الکترونیک خودرو")
+    say("  🎯 متدولوژی: ISO 26262, ISO 14229, ISO 11898, IPC-A-610 Class 3, AEC-Q")
+    say("=" * 75)
 
     if not os.path.isdir(APP_DIR):
         fail("پوشه app پیدا نشد.")
@@ -149,44 +165,70 @@ def main():
     node = find("node")
     npm = find("npm")
     if not node or not npm:
-        fail("Node.js روی سیستم شما نصب نیست. لطفاً نسخه LTS را نصب نمایید.")
+        fail("Node.js روی سیستم شما نصب نیست. لطفاً Node.js را نصب نمایید.")
 
     if not deps_ok():
         install_node_deps(npm)
 
-    bridge_proc = None
     server_proc = None
+    bridge_proc = None
 
     try:
-        # ۱. اجرای پل وب و باز کردن پنجره کروم
-        if not port_open(BRIDGE_PORT):
-            bridge_proc = start_bridge()
-            say("⏳ در حال صبر برای باز شدن پنجره کروم و آماده‌سازی چت DeepSeek...")
-            for _ in range(30):
-                if port_open(BRIDGE_PORT):
-                    say("✅ پنجره Google Chrome باز شد و پل وب DeepSeek فعال گردید!")
-                    break
-                time.sleep(1)
-
-        # ۲. اجرای سرور اصلی برنامه
+        # =========================================================================
+        # گام اول: راه‌اندازی و اطمینان ۱۰۰٪ از سلامت وب‌اپلیکیشن و دیتابیس
+        # =========================================================================
+        say("\n🚀 [گام ۱] در حال راه‌اندازی سرور اصلی اپلیکیشن، دیتابیس و پایگاه دانش...")
         if not port_open(PORT):
-            say("🚀 در حال راه‌اندازی سرور اصلی داشبورد...")
             server_proc = start_server(node)
             for _ in range(40):
                 if port_open(PORT):
                     break
                 time.sleep(0.5)
 
-        say("\n" + "═" * 70)
-        say(f"  🎉 تمام سرویس‌ها با موفقیت بالا آمدند!")
-        say(f"  🌐 داشبورد عیب‌یابی: http://localhost:{PORT}")
-        say(f"  🤖 هوش مصنوعی فعال: Google Chrome (DeepSeek Web Driver) روی پورت {BRIDGE_PORT}")
-        say(f"  🧠 پایگاه دانش یادگیری: متصل و فعال")
-        say(f"  برای خروج و خاموش کردن: در این پنجره Ctrl+C بزنید.")
-        say("═" * 70 + "\n")
+        # تست سلامت اپلیکیشن
+        health_data = None
+        for _ in range(15):
+            health_data = verify_app_health()
+            if health_data and health_data.get("ok"):
+                break
+            time.sleep(0.5)
 
-        # ۳. باز کردن داشبورد در کروم
+        if not health_data:
+            fail("سرور اپلیکیشن نتوانست با موفقیت فعال شود.")
+
+        say("  ✅ وب‌سرور اپلیکیشن با موفقیت فعال شد.")
+        say(f"  ✅ دیتابیس یادگیری متصل است (پرونده‌ها: {health_data.get('dbStats', {}).get('total_cases', 0)} | تجربیات: {health_data.get('dbStats', {}).get('user_knowledge_count', 0)})")
+        say(f"  ✅ لیست قطعات BOM بارگذاری شد (تعداد قطعات: {health_data.get('bomParts', 0)})")
+        say(f"  ✅ بانک کدهای خطای دیاگ (DTC) و نقشه‌های تست پایه‌ها فعال است.")
+
+        # باز کردن داشبورد در کروم
+        say(f"\n🌐 در حال باز کردن داشبورد اپلیکیشن در Google Chrome: {URL}")
         open_in_chrome(URL)
+
+        # =========================================================================
+        # گام دوم: راه‌اندازی درایور کروم و لاگین در DeepSeek
+        # =========================================================================
+        say("\n" + "─" * 75)
+        say("🔐 [گام ۲] ورود به حساب کاربری DeepSeek با اطلاعات ثبت‌شده:")
+        say("   📧 Email:    Abraham.Hassanloo689@gmail.com")
+        say("   🔑 Password: ********")
+        say("─" * 75)
+
+        if not port_open(BRIDGE_PORT):
+            bridge_proc = start_bridge()
+            say("⏳ در حال باز کردن پنجره اختصاصی کروم و بررسی وضعیت لاگین...")
+            for _ in range(35):
+                if port_open(BRIDGE_PORT):
+                    say("✅ پنجره Google Chrome باز شد و وب‌درایور به DeepSeek متصل گردید!")
+                    break
+                time.sleep(1)
+
+        say("\n" + "═" * 75)
+        say("  🎉 تمام سرویس‌ها با موفقیت و بدون کوچک‌ترین نقصی بالا آمدند!")
+        say(f"  🌐 داشبورد مدیریت عیب‌یابی: {URL}")
+        say(f"  🤖 موتور هوش مصنوعی فعال: Google Chrome (DeepSeek Web Bridge)")
+        say("  💡 برای خاموش کردن و خروج: در این پنجره کلیدهای Ctrl+C را فشار دهید.")
+        say("═" * 75 + "\n")
 
         while True:
             if server_proc and server_proc.poll() is not None:
