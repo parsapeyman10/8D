@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "اجرای دستیار عیب‌یابی",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/app/src/server.js",
+      "cwd": "${workspaceFolder}/app",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "اجرا با حالت دمو (سرور)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/app/src/server.js",
+      "cwd": "${workspaceFolder}/app",
+      "console": "integratedTerminal",
+      "env": { "DEMO_MODE": "1" },
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
