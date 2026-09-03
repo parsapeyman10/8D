@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-اسکریپت تست و اعتبارسنجی قطعی لاگین در DeepSeek
+اسکریپت تست و احراز هویت صبورانه و منظم در DeepSeek
 ===================================================
-این اسکریپت پنجره کروم را باز کرده و با ایمیل و رمز عبور شما لاگین را بررسی و تایید می‌کند.
+این اسکریپت پنجره کروم را باز کرده و با حوصله فرم sign_in را تکمیل و لاگین را تایید می‌کند.
 """
 
 import os
@@ -16,13 +16,13 @@ from deepseek_web_bridge import get_driver, ensure_logged_in_strict, check_if_lo
 
 def main():
     print("=" * 70)
-    print("  🔑 تست و احراز هویت لاگین در DeepSeek")
+    print("  🔑 تست و احراز هویت باحوصله لاگین در DeepSeek")
     print(f"  📧 ایمیل: {DEEPSEEK_EMAIL}")
     print("=" * 70)
 
     try:
         driver = get_driver()
-        is_ok = ensure_logged_in_strict(driver, max_wait_seconds=60)
+        is_ok = ensure_logged_in_strict(driver, max_wait_seconds=300)
         if is_ok:
             print("\n✅ نتیجه: لاگین با موفقیت انجام شد و ۱۰۰٪ تایید گردید!")
         else:

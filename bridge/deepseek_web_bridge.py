@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-پل وب DeepSeek — اتوماسیون دقیق صفحه ورود (chat.deepseek.com/sign_in)
-========================================================================
-این ماژول پنجره Google Chrome را کنترل کرده و فیلدهای صفحه sign_in را با
-دقت کامل (شناسایی المان‌ها، فوکوس، تایپ ایمیل و پسورد، و کلیک دکمه Log in)
-تکمیل می‌کند و سپس سوالات عیب‌یابی را از هوش مصنوعی دریافت می‌نماید.
+پل وب اختصاصی DeepSeek — اتوماسیون شکیبا، منظم و تضمین‌شده در Google Chrome
+=============================================================================
+این ماژول با صبر و شکیبایی کامل، صفحه chat.deepseek.com/sign_in را باز کرده،
+فیلدهای ایمیل و پسورد را با شبیه‌سازی کلیدهای طبیعی تایپ می‌کند، رویدادهای
+ورودی React/Vue را فعال می‌سازد، روی دکمه Log in کلیک کرده و با حوصله منتظر
+تایید نهایی ورود و انتقال به صفحه چت می‌ماند.
 
 اطلاعات کاربری:
   Email:    Abraham.Hassanloo689@gmail.com
@@ -48,7 +49,7 @@ LOGIN_STATUS = {
     "logged_in": False,
     "last_check": None,
     "email": DEEPSEEK_EMAIL,
-    "message": "در حال ورود خودکار با سلنیوم...",
+    "message": "در حال آماده‌سازی و ورود باحوصله به DeepSeek...",
 }
 
 app = Flask(__name__)
@@ -124,15 +125,15 @@ def cleanup_stale_locks(profile_path):
 
 
 def check_if_logged_in(d):
-    """بررسی وضعیت لاگین بودن در DeepSeek"""
+    """بررسی دقیق اینکه آیا کاربر وارد محیط چت شده است یا خیر"""
     try:
-        # اگر در صفحه sign_in باشیم، هنوز لاگین نیستیم
-        if "sign_in" in d.current_url or "login" in d.current_url:
+        # اگر هنوز در صفحه sign_in هستیم، لاگین کامل نشده
+        if "sign_in" in d.current_url:
             LOGIN_STATUS["logged_in"] = False
-            LOGIN_STATUS["message"] = "صفحه ورود (sign_in) باز است."
+            LOGIN_STATUS["message"] = "در صفحه ورود (sign_in) قرار دارید..."
             return False
 
-        # ۱. بررسی وجود کادر چت
+        # ۱. بررسی وجود کادر ورودی چت
         for sel in (
             "textarea#chat-input",
             "textarea[placeholder*='DeepSeek']",
@@ -149,7 +150,7 @@ def check_if_logged_in(d):
                     LOGIN_STATUS["message"] = "لاگین تایید و احراز هویت شد."
                     return True
 
-        # ۲. بررسی سایدبار و دکمه چت جدید
+        # ۲. بررسی سایدبار چت
         for sel in (".ds-sidebar", "[class*='sidebar']", "[class*='avatar']", ".ds-avatar"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
             if els and any(e.is_displayed() for e in els):
@@ -164,29 +165,49 @@ def check_if_logged_in(d):
     return False
 
 
+def type_slowly(element, text, d):
+    """تایپ حرف‌به‌حرف و طبیعی با سلنیوم به همراه تریگر رویدادهای فریمورک وب"""
+    element.click()
+    time.sleep(0.2)
+    element.send_keys(Keys.CONTROL + "a" if os.name == "nt" else Keys.COMMAND + "a")
+    element.send_keys(Keys.BACKSPACE)
+    time.sleep(0.2)
+
+    for char in text:
+        element.send_keys(char)
+        time.sleep(0.04)
+
+    # فعال‌سازی رویدادهای input و change برای اطمینان از خوانده شدن توسط Vue/React
+    try:
+        d.execute_script("""
+            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+            arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
+        """, element)
+    except Exception:
+        pass
+
+
 def perform_signin_automation(d):
     """
-    اتوماسیون کامل صفحه chat.deepseek.com/sign_in:
-    ۱. یافتن فیلد اول: Phone number / email address
-    ۲. فوکوس و تایپ ایمیل Abraham.Hassanloo689@gmail.com
-    ۳. یافتن فیلد دوم: Password
-    ۴. فوکوس و تایپ رمز عبور hsshhsj79
-    ۵. کلیک روی دکمه آبی Log in
+    اجرای گام به گام، منظم و شکیبا برای تکمیل فرم ورود
     """
     print("=" * 70)
-    print("🤖 [اتوماسیون ورود DeepSeek]")
-    print(f"🌐 آدرس صفحه: {d.current_url}")
+    print("🤖 [اتوماسیون ورود به حساب کاربری DeepSeek]")
     print(f"📧 ایمیل:    {DEEPSEEK_EMAIL}")
     print("🔑 کلمه عبور: ********")
     print("=" * 70)
 
-    time.sleep(1.5)
+    # صبر اولیه برای بارگذاری کامل و رندر المان‌های صفحه
+    print("⏳ [۱/۴] صبر برای رندر کامل المان‌های فرم ورود...")
+    time.sleep(3)
 
-    # ۱. شناسایی فیلد ایمیل (Phone number / email address)
+    # ۱. فیلد اول: ایمیل
     email_elem = None
     for sel in [
         "input[placeholder*='Phone number' i]",
         "input[placeholder*='email' i]",
+        "input[placeholder*='address' i]",
         "input[type='text']",
         "input[type='email']",
     ]:
@@ -202,28 +223,20 @@ def perform_signin_automation(d):
             pass
 
     if not email_elem:
-        # جستجو بر اساس اولین تگ input در صفحه
         inputs = d.find_elements(By.TAG_NAME, "input")
         if inputs and inputs[0].is_displayed():
             email_elem = inputs[0]
 
     if email_elem:
-        try:
-            ActionChains(d).move_to_element(email_elem).click().perform()
-            time.sleep(0.2)
-            email_elem.send_keys(Keys.CONTROL + "a" if os.name == "nt" else Keys.COMMAND + "a")
-            email_elem.send_keys(Keys.BACKSPACE)
-            email_elem.send_keys(DEEPSEEK_EMAIL)
-            print("✅ [۱] ایمیل با موفقیت در فیلد 'Phone number / email address' تایپ شد.")
-        except Exception as e1:
-            print(f"⚠️ تلاش برای تایپ ایمیل با اسکریپت: {e1}")
-            d.execute_script("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', {bubbles:true}));", email_elem, DEEPSEEK_EMAIL)
+        print("✍️ [۲/۴] در حال تایپ ایمیل در فیلد اول...")
+        type_slowly(email_elem, DEEPSEEK_EMAIL, d)
+        print("  ✅ ایمیل با موفقیت درج شد.")
     else:
-        print("❌ فیلد ایمیل پیدا نشد!")
+        print("⚠️ فیلد ایمیل پیدا نشد.")
 
-    time.sleep(0.5)
+    time.sleep(1)
 
-    # ۲. شناسایی فیلد کلمه عبور (Password)
+    # ۲. فیلد دوم: رمز عبور
     pass_elem = None
     for sel in [
         "input[type='password']",
@@ -246,33 +259,16 @@ def perform_signin_automation(d):
             pass_elem = inputs[1]
 
     if pass_elem:
-        try:
-            ActionChains(d).move_to_element(pass_elem).click().perform()
-            time.sleep(0.2)
-            pass_elem.send_keys(Keys.CONTROL + "a" if os.name == "nt" else Keys.COMMAND + "a")
-            pass_elem.send_keys(Keys.BACKSPACE)
-            pass_elem.send_keys(DEEPSEEK_PASSWORD)
-            print("✅ [۲] کلمه عبور با موفقیت در فیلد 'Password' تایپ شد.")
-        except Exception as e2:
-            print(f"⚠️ تلاش برای تایپ پسورد با اسکریپت: {e2}")
-            d.execute_script("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', {bubbles:true}));", pass_elem, DEEPSEEK_PASSWORD)
+        print("✍️ [۳/۴] در حال تایپ کلمه عبور در فیلد دوم...")
+        type_slowly(pass_elem, DEEPSEEK_PASSWORD, d)
+        print("  ✅ کلمه عبور با موفقیت درج شد.")
     else:
-        print("❌ فیلد پسورد پیدا نشد!")
+        print("⚠️ فیلد پسورد پیدا نشد.")
 
-    time.sleep(0.5)
+    # زمان برای اعتبارسنجی فرانت‌اند و فعال شدن دکمه
+    time.sleep(1.5)
 
-    # ۳. بررسی وجود هرگونه چک‌باکس قوانین در صورت وجود
-    for cb in d.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], .ds-checkbox, span[class*='checkbox']"):
-        try:
-            if cb.is_displayed():
-                ActionChains(d).move_to_element(cb).click().perform()
-                print("☑️ تیک قوانین زده شد.")
-        except Exception:
-            pass
-
-    time.sleep(0.5)
-
-    # ۴. کلیک روی دکمه آبی Log in
+    # ۳. کلیک روی دکمه آبی Log in
     login_btn = None
     for sel in [
         "//button[contains(normalize-space(), 'Log in') or contains(normalize-space(), 'Log In')]",
@@ -292,7 +288,7 @@ def perform_signin_automation(d):
             pass
 
     if login_btn:
-        print("🚀 [۳] در حال کلیک روی دکمه آبی 'Log in'...")
+        print("🚀 [۴/۴] در حال فشردن دکمه آبی 'Log in'...")
         try:
             ActionChains(d).move_to_element(login_btn).click().perform()
         except Exception:
@@ -300,60 +296,63 @@ def perform_signin_automation(d):
                 login_btn.click()
             except Exception:
                 d.execute_script("arguments[0].click();", login_btn)
-        print("✅ دکمه Log in فشرده شد!")
+        print("  ✅ دکمه Log in فشرده شد.")
     else:
-        # اگر دکمه پیدا نشد، Enter روی فیلد پسورد می‌زنیم
         if pass_elem:
+            print("🚀 فشردن کلید Enter روی فیلد پسورد...")
             pass_elem.send_keys(Keys.ENTER)
-            print("✅ کلید Enter روی فیلد پسورد فشرده شد.")
 
 
-def ensure_logged_in_strict(d, max_wait_seconds=120):
-    """هدایت به صفحه لاگین، ورود خودکار و انتظار برای ورود به چت"""
-    # اگر هنوز در صفحه دیگریم یا لاگین نیستیم
+def ensure_logged_in_strict(d, max_wait_seconds=300):
+    """
+    بررسی، هدایت به صفحه لاگین و انتظار صبورانه برای تایید کامل ورود
+    """
+    print("\n🔍 در حال بررسی وضعیت ورود کاربر به حساب DeepSeek...")
+    time.sleep(2)
+
+    # اگر کاربر از قبل لاگین است
     if check_if_logged_in(d):
-        print("🎉 [تایید شد] حساب کاربری شما از قبل لاگین است و چت آماده دریافت سوالات است.")
+        print("🎉 [تایید شد] حساب کاربری شما فعال است و صفحه چت آماده دریافت سوالات می‌باشد.")
         return True
 
-    # باز کردن صفحه sign_in در صورت نیاز
+    # اگر در صفحه لاگین نیستیم، هدایت به صفحه لاگین
     if not ("sign_in" in d.current_url or "chat.deepseek.com" in d.current_url):
         d.get(SIGN_IN_URL)
-        time.sleep(2)
+        time.sleep(3)
 
-    # اجرای اتوماسیون ورود
+    # تکمیل منظم و مرحله‌به‌مرحله فرم ورود
     perform_signin_automation(d)
 
-    print("⏳ در حال مانیتورینگ انتقال به صفحه چت DeepSeek...")
+    print("\n" + "─" * 70)
+    print("⏳ در حال نظارت باحوصله بر تایید نهایی ورود به DeepSeek...")
+    print("👉 اگر در پنجره کروم پازل امنیتی (کپچا / GeeTest) ظاهر شد، آن را با ماوس بکشید.")
+    print("─" * 70 + "\n")
+
     start_time = time.time()
-    captcha_alerted = False
+    last_log_time = 0
 
     while time.time() - start_time < max_wait_seconds:
         time.sleep(2)
+
         if check_if_logged_in(d):
-            print("=" * 70)
-            print("🎉 لاگین به DeepSeek با موفقیت انجام و تایید شد!")
-            print("🤖 هوش مصنوعی آماده پاسخگویی به سوالات عیب‌یابی است.")
-            print("=" * 70)
+            print("\n" + "=" * 70)
+            print("🎉 تبریک! ورود به حساب کاربری DeepSeek با موفقیت ۱۰۰٪ تایید شد.")
+            print("🤖 مدل هوش مصنوعی اکنون به داشبورد عیب‌یابی متصل است.")
+            print("=" * 70 + "\n")
             return True
 
-        # بررسی کپچا
-        for sel in ("iframe[src*='geetest']", "iframe[src*='captcha']", ".geetest_holder", ".cf-turnstile", "[class*='captcha']"):
-            try:
-                cap_els = d.find_elements(By.CSS_SELECTOR, sel)
-                if cap_els and any(c.is_displayed() for c in cap_els):
-                    if not captcha_alerted:
-                        print("⚠️ [توجه] پازل کشویی امنیتی در پنجره کروم ظاهر شده است.")
-                        print("👉 لطفاً پازل امنیتی را در کروم حل کنید تا ورود تایید شود.")
-                        captcha_alerted = True
-            except Exception:
-                pass
+        # هر ۱۰ ثانیه وضعیت را گزارش کنیم
+        elapsed = int(time.time() - start_time)
+        if elapsed - last_log_time >= 10:
+            last_log_time = elapsed
+            print(f"⏳ ({elapsed}s) منتظر بارگذاری صفحه چت و تایید لاگین...")
 
-        # اگر بعد از ۱۰ ثانیه هنوز در sign_in بود و اروری نداده بود، مجدداً فرم را چک کنیم
-        if time.time() - start_time > 15 and "sign_in" in d.current_url and not captcha_alerted:
-            print("🔄 بررسی مجدد و ارسال فرم لاگین...")
-            perform_signin_automation(d)
-            time.sleep(5)
+            # اگر هنوز در sign_in است و دکمه کلیک نشده، یک بار دیگر کلیک دکمه را بررسی کنیم
+            if "sign_in" in d.current_url and elapsed in (20, 40):
+                print("🔄 بررسی مجدد فیلدها و دکمه ورود...")
+                perform_signin_automation(d)
 
+    print("⚠️ مهلت زمانی به پایان رسید اما لاگین تایید نشد.")
     return False
 
 
@@ -487,7 +486,7 @@ def ask_deepseek(prompt: str) -> str:
     d = get_driver()
 
     if not check_if_logged_in(d):
-        print("⚠️ کاربر در صفحه چت نیست. اقدام برای بررسی و تکمیل لاگین...")
+        print("⚠️ کاربر هنوز در صفحه چت نیست. اقدام مجدد برای بررسی و تایید لاگین...")
         if not ensure_logged_in_strict(d, max_wait_seconds=60):
             raise RuntimeError("ابتدا باید وارد حساب DeepSeek شوید. لطفاً لاگین را تکمیل نمایید.")
 
@@ -595,7 +594,7 @@ def chat_completions():
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("  🌐 پل وب DeepSeek (اتوماسیون مستقیم صفحه chat.deepseek.com/sign_in)")
+    print("  🌐 پل وب DeepSeek (اتوماسیون صبورانه و منظم صفحه sign_in)")
     print(f"  ایمیل ورود:    {DEEPSEEK_EMAIL}")
     print(f"  رمز عبور:      ********")
     print(f"  آدرس پل:       http://localhost:{PORT}/v1")
