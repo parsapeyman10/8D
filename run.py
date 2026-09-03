@@ -96,7 +96,10 @@ def ensure_python_deps():
     if missing:
         say(f"📦 در حال نصب خودکار پکیج‌های پایتون ({', '.join(missing)})...")
         try:
-            subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True)
+            cmd = [sys.executable, "-m", "pip", "install", *missing]
+            if os.name != "nt":
+                cmd.append("--break-system-packages")
+            subprocess.run(cmd, check=True)
             say("✅ پکیج‌های پایتون با موفقیت نصب شدند.")
             return True
         except Exception as e:
