@@ -646,9 +646,7 @@ app.post('/api/session/start', async (req, res) => {
     const cfg = getLlmConfig(req);
     if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
 
-    const language = req.body?.language === 'en' || req.body?.language === 'fa'
-      ? req.body.language
-      : detectLanguage(symptom);
+    const language = req.body?.language === 'en' ? 'en' : 'fa';
     const state = newState(symptom, language);
     const id = crypto.randomUUID();
     sessions.set(id, state);

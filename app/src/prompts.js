@@ -65,9 +65,10 @@ This fallback option is mandatory.
 </fallback_option_rule>
 
 <language_handling>
-Generate the question and options in the language specified by the "language" field.
-If "language" is missing or ambiguous, use the language of the original symptom.
-For Persian users, output natural Persian suitable for technicians.
+CRITICAL LANGUAGE CONSTRAINT:
+All generated output intended for the user (the question, all multiple-choice options, hypothesis descriptions, and ruled-out explanations) MUST be in natural, fluent Persian (فارسی روان و فنی مناسب تکنسین‌ها).
+Even if the input symptom contains English terms, acronyms, or component part numbers (e.g., IC, TJA1055, CAN, MLCC, RH850), you must formulate the entire question and options in Persian.
+Only keep part numbers / reference designators as they are.
 </language_handling>
 
 <contradiction_handling>
@@ -168,15 +169,15 @@ Report both numeric confidence % and band:
 </confidence_calibration>
 
 <output>
-Output ONLY valid JSON in this shape, with all human-readable strings in the user's language ("language" field of the case):
+Output ONLY valid JSON in this shape, with ALL human-readable strings strictly in fluent Persian (فارسی):
 
 {
   "root_causes": [
-    {"cause": "...", "confidence": 0, "band": "High|Medium|Low", "evidence": "one line"}
+    {"cause": "توضیح علت ریشه‌ای به فارسی", "confidence": 0, "band": "High|Medium|Low", "evidence": "شواهد تاییدکننده به فارسی"}
   ],
-  "unresolved_conflicts": ["..."],
-  "recommended_actions": ["step 1", "step 2"],
-  "escalate_if": ["condition 1", "condition 2"]
+  "unresolved_conflicts": ["تناقض‌های حل‌نشده به فارسی"],
+  "recommended_actions": ["اقدام پیشنهادی گام ۱ به فارسی", "اقدام گام ۲ به فارسی"],
+  "escalate_if": ["شرایط ارجاع به فارسی"]
 }
 </output>
 
@@ -208,12 +209,12 @@ Using the known-issue categories as your primary evidence base (do not contradic
 </task>
 
 <output>
-JSON only, all strings in the requested language:
+JSON only, all strings strictly in natural technical Persian (فارسی روان و تخصصی):
 {
-  "summary": "...",
-  "failure_modes": [{"mode": "...", "likelihood": "High|Medium|Low", "why": "..."}],
-  "inspection_steps": ["step 1", "step 2"],
-  "process_notes": ["..."]
+  "summary": "خلاصه نقش قطعه و ارزیابی ریسک به فارسی",
+  "failure_modes": [{"mode": "حالت خرابی به فارسی", "likelihood": "High|Medium|Low", "why": "دلیل فنی به فارسی"}],
+  "inspection_steps": ["گام تست ۱ به فارسی", "گام تست ۲ به فارسی"],
+  "process_notes": ["نکات فرایند مونتاژ یا نگهداری به فارسی"]
 }
 </output>
 
