@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-پل وب DeepSeek — بدون کلید API (Bridge)
-======================================
-این سرویس مرورگر را باز می‌کند، به chat.deepseek.com می‌رود،
-سوال را ارسال می‌کند و پاسخ را به اپ تحویل می‌دهد.
+پل وب DeepSeek — حالت کاملاً مخفی (Headless) + ورود خودکار
+============================================================
+این سرویس مرورگر را در پس‌زمینه (کاملاً مخفی و بدون باز شدن پنجره) باز می‌کند،
+به صورت خودکار با اطلاعات داده‌شده لاگین می‌کند، سوالات را دریافت کرده و
+پاسخ را به اپ تحویل می‌دهد.
 
 آدرس برای اپ:  http://localhost:8765/v1
 در اپ: ⚙️ تنظیمات مدل → 🌐 مرورگر کروم (پل سلنیومی)
-
-نصب و اجرا:
-    pip install selenium flask
-    python bridge/deepseek_web_bridge.py
 """
 
 import json
@@ -35,6 +32,11 @@ CHAT_URL = "https://chat.deepseek.com/"
 PROFILE_DIR = os.path.join(os.path.expanduser("~"), ".deepseek_web_profile")
 ANSWER_TIMEOUT = int(os.environ.get("ANSWER_TIMEOUT", "300"))  # ثانیه
 
+# اطلاعات ورود (پیش‌فرض یا از متغیرهای محیطی)
+DEEPSEEK_EMAIL = os.environ.get("DEEPSEEK_EMAIL", "Abraham.Hassanloo689@gmail.com")
+DEEPSEEK_PASSWORD = os.environ.get("DEEPSEEK_PASSWORD", "hsshhsj79")
+HEADLESS_MODE = os.environ.get("HEADLESS", "1").strip().lower() not in ("0", "false", "no")
+
 app = Flask(__name__)
 _lock = threading.Lock()   # هم‌زمان فقط یک سوال
 _driver = None
@@ -46,11 +48,9 @@ def find_local_driver():
     if env_path and os.path.isfile(env_path):
         return ("chrome", env_path)
 
-    # پسوندهای احتمالی
     names_chrome = ["chromedriver.exe", "chromedriver"] if os.name == "nt" else ["chromedriver"]
     names_edge = ["msedgedriver.exe", "msedgedriver"] if os.name == "nt" else ["msedgedriver"]
 
-    # ۱. جستجو در پوشه bridge و ریشه پروژه
     search_dirs = [HERE, REPO_ROOT, os.getcwd()]
     for d in search_dirs:
         for name in names_chrome:
@@ -62,7 +62,6 @@ def find_local_driver():
             if os.path.isfile(p):
                 return ("edge", p)
 
-    # ۲. جستجو در PATH سیستم
     for name in names_chrome:
         w = shutil.which(name)
         if w:
@@ -75,37 +74,141 @@ def find_local_driver():
     return (None, None)
 
 
-def print_driver_help():
-    print("""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  ❌ خطای دسترسی به درایور مرورگر (ChromeDriver)                              ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  علت خطا:                                                                    ║
-║  سلنیوم تلاش کرد درایور کروم را از سایت گوگل (googlechromelabs.github.io)    ║
-║  دانلود کند، اما این آدرس در ایران به دلیل تحریم یا فیلترینگ در دسترس نیست.  ║
-║                                                                              ║
-║  راهکارهای رفع مشکل:                                                         ║
-║                                                                              ║
-║  🔹 راهکار ۱ (ساده‌ترین - با فیلترشکن):                                       ║
-║     فیلترشکن (VPN) را روشن کنید و دوباره این اسکریپت را اجرا کنید.            ║
-║     سلنیوم یک بار درایور را دانلود و ذخیره می‌کند و دفعات بعد نیازی نیست.    ║
-║                                                                              ║
-║  🔹 راهکار ۲ (دانلود دستی chromedriver.exe):                                 ║
-║     ۱. در کروم به آدرس chrome://settings/help بروید و نسخه کروم را ببینید.   ║
-║     ۲. فایل chromedriver.exe متناسب با نسخه خود را دانلود کنید:               ║
-║        https://googlechromelabs.github.io/chrome-for-testing/                ║
-║     ۳. فایل chromedriver.exe را داخل پوشه bridge قرار دهید.                  ║
-║                                                                              ║
-║  🔹 راهکار ۳ (پیشنهادی - بدون نیاز به کروم و پل):                            ║
-║     در مرورگر به آدرس http://localhost:3000 بروید.                          ║
-║     روی ⚙️ تنظیمات مدل کلیک کنید و یکی از ارائه‌دهنده‌های رایگان مانند:       ║
-║     - Groq (مدل Llama 3.3 70B - فوق‌العاده سریع و رایگان)                   ║
-║     - OpenRouter (مدل‌های رایگان DeepSeek)                                  ║
-║     - AvalAI یا GapGPT (درگاه‌های ایرانی بدون تحریم)                        ║
-║     را انتخاب کنید. این روش نیازی به اجرای این اسکریپت یا کروم ندارد!        ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-""")
+def _setup_options(is_chrome=True):
+    """تنظیمات مرورگر شامل حالت مخفی و جلوگیری از تشخیص بات"""
+    if is_chrome:
+        opts = webdriver.ChromeOptions()
+    else:
+        opts = webdriver.EdgeOptions()
+
+    opts.add_argument(f"--user-data-dir={PROFILE_DIR if is_chrome else PROFILE_DIR + '_edge'}")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+    opts.add_experimental_option("useAutomationExtension", False)
+
+    if HEADLESS_MODE:
+        # حالت کاملاً مخفی و نامرئی در پس‌زمینه
+        opts.add_argument("--headless=new")
+        opts.add_argument("--window-size=1920,1080")
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--mute-audio")
+    else:
+        opts.add_argument("--start-maximized")
+
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+    return opts
+
+
+def _auto_login(d):
+    """ورود خودکار به DeepSeek با ایمیل و پسورد در صورت نیاز"""
+    try:
+        # ۱. بررسی اینکه آیا از قبل لاگین هستیم یا نه
+        time.sleep(2)
+        for sel in ("textarea#chat-input", "textarea", "div[contenteditable='true']"):
+            els = d.find_elements(By.CSS_SELECTOR, sel)
+            for el in els:
+                if el.is_displayed():
+                    # لاگین است
+                    return True
+
+        # ۲. بررسی وجود فرم لاگین
+        print(f"🔐 در حال ورود خودکار با حساب: {DEEPSEEK_EMAIL} ...")
+
+        # در صورت وجود تب رمز عبور یا ورود با ایمیل
+        tab_selectors = [
+            "//div[contains(text(), 'Password') or contains(text(), 'رمز') or contains(text(), 'Log in with password')]",
+            "//button[contains(text(), 'Password') or contains(text(), 'Log in')]",
+            "//span[contains(text(), 'Password') or contains(text(), 'رمز')]"
+        ]
+        for xpath in tab_selectors:
+            try:
+                tabs = d.find_elements(By.XPATH, xpath)
+                for tab in tabs:
+                    if tab.is_displayed():
+                        tab.click()
+                        time.sleep(0.5)
+                        break
+            except Exception:
+                pass
+
+        # ۳. وارد کردن ایمیل
+        email_inputs = d.find_elements(By.CSS_SELECTOR, "input[type='email'], input[placeholder*='email' i], input[placeholder*='phone' i], input[placeholder*='ایمیل' i], input[type='text']")
+        email_box = None
+        for box in email_inputs:
+            if box.is_displayed() and box.is_enabled():
+                email_box = box
+                break
+
+        if email_box:
+            email_box.clear()
+            email_box.send_keys(DEEPSEEK_EMAIL)
+            time.sleep(0.3)
+
+        # ۴. وارد کردن پسورد
+        pass_inputs = d.find_elements(By.CSS_SELECTOR, "input[type='password']")
+        pass_box = None
+        for box in pass_inputs:
+            if box.is_displayed() and box.is_enabled():
+                pass_box = box
+                break
+
+        if pass_box:
+            pass_box.clear()
+            pass_box.send_keys(DEEPSEEK_PASSWORD)
+            time.sleep(0.3)
+
+        # ۵. تیک زدن قوانین و شرایط (Terms of service) در صورت وجود
+        checkboxes = d.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], .ds-checkbox, span[class*='checkbox'], div[class*='checkbox']")
+        for cb in checkboxes:
+            try:
+                if cb.is_displayed():
+                    d.execute_script("arguments[0].click();", cb)
+                    time.sleep(0.2)
+            except Exception:
+                pass
+
+        # ۶. کلیک روی دکمه ورود (Sign In / Log In)
+        btn_selectors = [
+            "button[type='submit']",
+            ".ds-button--primary",
+            "//button[contains(., 'Log') or contains(., 'Sign') or contains(., 'ورود')]",
+            "//div[contains(@class, 'button') and (contains(., 'Log') or contains(., 'Sign'))]"
+        ]
+        clicked = False
+        for sel in btn_selectors:
+            try:
+                if sel.startswith("//"):
+                    btns = d.find_elements(By.XPATH, sel)
+                else:
+                    btns = d.find_elements(By.CSS_SELECTOR, sel)
+                for btn in btns:
+                    if btn.is_displayed() and btn.is_enabled():
+                        d.execute_script("arguments[0].click();", btn)
+                        clicked = True
+                        break
+                if clicked:
+                    break
+            except Exception:
+                pass
+
+        # ۷. صبر برای ورود و لود شدن چت
+        print("⏳ منتظر تایید ورود...")
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            time.sleep(1.5)
+            for sel in ("textarea#chat-input", "textarea", "div[contenteditable='true']"):
+                els = d.find_elements(By.CSS_SELECTOR, sel)
+                for el in els:
+                    if el.is_displayed():
+                        print("✅ ورود خودکار با موفقیت انجام شد و نشست ذخیره گردید!")
+                        return True
+
+    except Exception as e:
+        print(f"⚠️ وضعیت ورود خودکار: {e}")
+
+    return False
 
 
 # ---------------------------------------------------------------- مرورگر
@@ -119,65 +222,52 @@ def get_driver():
             _driver = None
 
     driver_type, driver_path = find_local_driver()
+    mode_text = "مخفی (Headless)" if HEADLESS_MODE else "نمایان"
+    print(f"🚀 در حال راه‌اندازی مرورگر در حالت {mode_text}...")
 
-    # ۱. اگر درایور محلی پیدا شد، مستقیماً از آن استفاده کن (بدون اتصال به سرور گوگل)
+    # ۱. اگر درایور محلی پیدا شد
     if driver_path:
-        print(f"🔧 استفاده از درایور محلی یافت‌شده: {driver_path}")
+        print(f"🔧 استفاده از درایور محلی: {driver_path}")
         try:
             if driver_type == "chrome":
-                opts = webdriver.ChromeOptions()
-                opts.add_argument(f"--user-data-dir={PROFILE_DIR}")
-                opts.add_argument("--disable-blink-features=AutomationControlled")
-                opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-                opts.add_argument("--start-maximized")
+                opts = _setup_options(is_chrome=True)
                 service = ChromeService(executable_path=driver_path)
                 _driver = webdriver.Chrome(service=service, options=opts)
             else:
                 from selenium.webdriver.edge.service import Service as EdgeService
-                opts = webdriver.EdgeOptions()
-                opts.add_argument(f"--user-data-dir={PROFILE_DIR}_edge")
-                opts.add_argument("--disable-blink-features=AutomationControlled")
-                opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-                opts.add_argument("--start-maximized")
+                opts = _setup_options(is_chrome=False)
                 service = EdgeService(executable_path=driver_path)
                 _driver = webdriver.Edge(service=service, options=opts)
 
             _driver.get(CHAT_URL)
-            print("🌐 مرورگر باز شد. اگر صفحه ورود می‌بینید، یک بار وارد شوید...")
+            _auto_login(_driver)
+            print("🌐 مرورگر آماده به کار است.")
             return _driver
         except Exception as e:
             print(f"⚠️ استفاده از درایور محلی با خطا مواجه شد: {e}")
 
-    # ۲. تلاش عادی با Selenium Manager خودکار
+    # ۲. تلاش عادی خودکار
     try:
-        opts = webdriver.ChromeOptions()
-        opts.add_argument(f"--user-data-dir={PROFILE_DIR}")
-        opts.add_argument("--disable-blink-features=AutomationControlled")
-        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-        opts.add_argument("--start-maximized")
+        opts = _setup_options(is_chrome=True)
         _driver = webdriver.Chrome(options=opts)
         _driver.get(CHAT_URL)
-        print("🌐 کروم باز شد. اگر صفحه ورود می‌بینید، یک بار وارد شوید...")
+        _auto_login(_driver)
+        print("🌐 مرورگر آماده به کار است.")
         return _driver
     except Exception as chrome_err:
-        # ۳. تلاش با Edge به عنوان جایگزین در ویندوز
+        # ۳. تلاش با Edge در ویندوز
         if os.name == "nt":
             try:
-                print("⚠️ کروم در دسترس نبود — تلاش برای باز کردن با Microsoft Edge...")
-                from selenium.webdriver.edge.options import Options as EdgeOptions
-                edge_opts = EdgeOptions()
-                edge_opts.add_argument(f"--user-data-dir={PROFILE_DIR}_edge")
-                edge_opts.add_argument("--disable-blink-features=AutomationControlled")
-                edge_opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-                edge_opts.add_argument("--start-maximized")
-                _driver = webdriver.Edge(options=edge_opts)
+                print("⚠️ تلاش با Microsoft Edge...")
+                opts = _setup_options(is_chrome=False)
+                _driver = webdriver.Edge(options=opts)
                 _driver.get(CHAT_URL)
-                print("🌐 مرورگر Edge باز شد. اگر صفحه ورود می‌بینید، یک بار وارد شوید...")
+                _auto_login(_driver)
+                print("🌐 مرورگر Edge آماده به کار است.")
                 return _driver
             except Exception:
                 pass
 
-        print_driver_help()
         raise chrome_err
 
 
@@ -243,14 +333,14 @@ def ask_deepseek(prompt: str) -> str:
             last = cur
     if last:
         return last
-    raise TimeoutError("پاسخی از سایت دریافت نشد (تایم‌اوت). لاگین بودن و باز بودن پنجره مرورگر را بررسی کنید.")
+    raise TimeoutError("پاسخی از سایت دریافت نشد (تایم‌اوت). لطفا اتصال اینترنت را بررسی کنید.")
 
 
 # ------------------------------------------------- endpoint سازگار با OpenAI
 @app.get("/")
 @app.get("/v1")
 def health():
-    return jsonify({"ok": True, "bridge": "deepseek-web", "port": PORT})
+    return jsonify({"ok": True, "bridge": "deepseek-web", "port": PORT, "headless": HEADLESS_MODE})
 
 
 @app.post("/v1/chat/completions")
@@ -287,14 +377,16 @@ def chat_completions():
 
 if __name__ == "__main__":
     print("=" * 65)
-    print("  🌉 پل وب DeepSeek (بدون کلید API)")
+    print("  🌉 پل وب DeepSeek (حالت مخفی / نامرئی + ورود خودکار)")
+    print(f"  حالت اجرا:     {'مخفی در پس‌زمینه (Headless)' if HEADLESS_MODE else 'نمایش پنجره'}")
+    print(f"  ایمیل لاگین:   {DEEPSEEK_EMAIL}")
     print(f"  آدرس برای اپ:  http://localhost:{PORT}/v1")
     print("  در اپ: ⚙️ تنظیمات مدل → 🌐 مرورگر کروم (پل سلنیومی)")
     print("=" * 65)
     try:
-        get_driver()  # مرورگر از همان اول باز شود تا کاربر لاگین کند
-    except Exception:
-        print("\n⚠️ برنامه متوقف شد. لطفاً راهنماهای بالا را بررسی کنید.")
+        get_driver()  # مرورگر در پس‌زمینه اجرا و لاگین خودکار انجام می‌شود
+    except Exception as e:
+        print(f"\n⚠️ خطا در راه‌اندازی مرورگر: {e}")
         if os.name == "nt":
             input("\nبرای خروج Enter بزنید...")
         sys.exit(1)
