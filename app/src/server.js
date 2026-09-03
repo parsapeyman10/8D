@@ -26,10 +26,10 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
-const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'gemini';
+const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'bridge';
+const BRIDGE_URL = process.env.BRIDGE_URL || 'http://127.0.0.1:8765/v1';
 const ENV_GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const ENV_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
-const GEMINI_DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 const DEFAULT_MAX_QUESTIONS = 8;
 
 // Initialize Learning Database
@@ -266,7 +266,7 @@ function ensureFallbackOption(options) {
 // ---- Generic LLM call helper ----
 async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 3000 }) {
   const body = {
-    model,
+    model: model || 'deepseek-web',
     temperature,
     max_tokens: maxTokens,
     messages: [
@@ -274,10 +274,10 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
       { role: 'user', content: user },
     ],
   };
-  if (jsonMode && !/reasoner|r1/i.test(model)) {
+  if (jsonMode && !/reasoner|r1/i.test(model || '')) {
     body.response_format = { type: 'json_object' };
   }
-  const base = (cfg.baseUrl || 'https://api.deepseek.com').replace(/\/+$/, '');
+  const base = (cfg.baseUrl || (cfg.provider === 'bridge' ? BRIDGE_URL : 'https://api.deepseek.com')).replace(/\/+$/, '');
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -288,7 +288,7 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    const err = new Error(`LLM API error ${res.status}: ${text.slice(0, 500)}`);
+    const err = new Error(`LLM error ${res.status}: ${text.slice(0, 500)}`);
     err.status = res.status;
     throw err;
   }
@@ -338,23 +338,10 @@ async function callJson(opts, retries = 1) {
   let parsed = tryParseJson(content);
   while (parsed === null && retries > 0) {
     retries -= 1;
-    if (cfg.provider === 'gemini') {
-      content = await callGemini({
-        apiKey: cfg.apiKey || ENV_GEMINI_KEY,
-        model: opts.model || cfg.chatModel || 'gemini-1.5-flash',
-        system: opts.system,
-        user: opts.user + '\n\nReturn valid JSON only. No markdown, no formatting.',
-        temperature: opts.temperature ?? 0.1,
-        jsonMode: true,
-        maxTokens: opts.maxTokens || 3500,
-        baseUrl: cfg.baseUrl,
-      });
-    } else {
-      content = await callDeepSeek({
-        ...opts,
-        user: opts.user + '\n\nReturn valid JSON only. No prose, no markdown, no explanation.',
-      });
-    }
+    content = await callDeepSeek({
+      ...opts,
+      user: opts.user + '\n\nReturn valid JSON only. No prose, no markdown, no explanation.',
+    });
     parsed = tryParseJson(content);
   }
   return parsed;
@@ -381,6 +368,7 @@ async function nextStep(cfg, state) {
   if (cfg.demo) return demoNextStep(state);
 
   try {
+    console.log(`[Tier 1] ارسال سوال به مدل هوش مصنوعی (${cfg.provider})...`);
     const parsed = await callJson({
       cfg,
       model: cfg.chatModel,
@@ -391,7 +379,7 @@ async function nextStep(cfg, state) {
 
     if (parsed) return parsed;
   } catch (err) {
-    console.warn(`⚠️ فراخوانی مدل (${cfg.provider}) با خطا مواجه شد (${err.message}). جابجایی خودکار به موتور هوش مصنوعی آفلاین.`);
+    console.warn(`⚠️ خطا در دریافت از مدل (${cfg.provider}): ${err.message}. استفاده از موتور آفلاین.`);
     return runOfflineStep(state);
   }
 
@@ -406,6 +394,7 @@ async function finalReport(cfg, state) {
   if (cfg.demo) return demoFinalReport(state);
 
   try {
+    console.log(`[Tier 2] دریافت گزارش تحلیلی و 8D از مدل هوش مصنوعی (${cfg.provider})...`);
     const parsed = await callJson({
       cfg,
       model: cfg.reasonerModel,
@@ -416,7 +405,7 @@ async function finalReport(cfg, state) {
     });
     if (parsed && Array.isArray(parsed.root_causes)) return parsed;
   } catch (err) {
-    console.warn(`⚠️ دریافت گزارش از مدل (${cfg.provider}) ناموفق بود (${err.message}). صدور گزارش با موتور تخصصی آفلاین.`);
+    console.warn(`⚠️ خطا در دریافت گزارش از مدل (${cfg.provider}): ${err.message}. استفاده از موتور آفلاین.`);
     return runOfflineReport(state);
   }
 
@@ -449,15 +438,29 @@ function getLlmConfig(req) {
   const chatModel = (req.headers['x-chat-model'] || '').toString().trim();
   const reasonerModel = (req.headers['x-reasoner-model'] || '').toString().trim();
 
-  // Handle Gemini (Default)
+  // 1. DeepSeek Selenium Chrome Bridge (Default)
+  if (provider === 'bridge') {
+    return {
+      provider: 'bridge',
+      apiKey: 'bridge',
+      baseUrl: headerBase || BRIDGE_URL,
+      chatModel: chatModel || 'deepseek-web-chrome',
+      reasonerModel: reasonerModel || chatModel || 'deepseek-web-chrome',
+      demo: false,
+      offline: false,
+      needsKey: false,
+    };
+  }
+
+  // 2. Google Gemini
   if (provider === 'gemini') {
     return {
       provider: 'gemini',
       apiKey: apiKey || ENV_GEMINI_KEY,
       baseUrl: headerBase || 'https://generativelanguage.googleapis.com/v1beta',
-      chatModel: chatModel || GEMINI_DEFAULT_MODEL,
-      reasonerModel: reasonerModel || chatModel || GEMINI_DEFAULT_MODEL,
-      demo: isDemoKey(apiKey),
+      chatModel: chatModel || 'gemini-1.5-flash',
+      reasonerModel: reasonerModel || chatModel || 'gemini-1.5-flash',
+      demo: false,
       offline: false,
       needsKey: true,
     };
@@ -470,8 +473,6 @@ function getLlmConfig(req) {
   let baseUrl = 'https://api.deepseek.com';
   if (provider === 'local' || provider === 'ollama') {
     baseUrl = headerBase || process.env.LOCAL_BASE_URL || 'http://localhost:11434/v1';
-  } else if (provider === 'bridge') {
-    baseUrl = headerBase || 'http://localhost:8765/v1';
   } else if (provider === 'lmstudio') {
     baseUrl = headerBase || 'http://localhost:1234/v1';
   } else if (headerBase) {
@@ -482,69 +483,11 @@ function getLlmConfig(req) {
     provider,
     apiKey,
     baseUrl,
-    chatModel: chatModel || (provider === 'local' || provider === 'ollama' ? 'deepseek-r1:8b' : 'deepseek-chat'),
-    reasonerModel: reasonerModel || chatModel || (provider === 'local' || provider === 'ollama' ? 'deepseek-r1:8b' : 'deepseek-reasoner'),
-    demo: isDemoKey(apiKey),
+    chatModel: chatModel || 'deepseek-chat',
+    reasonerModel: reasonerModel || chatModel || 'deepseek-reasoner',
+    demo: false,
     offline: false,
     needsKey: provider === 'cloud' || provider === 'custom',
-  };
-}
-
-function isDemoKey(apiKey) {
-  return process.env.DEMO_MODE === '1' || /^demo$/i.test(apiKey);
-}
-
-const DEMO_QUESTIONS = [
-  { question: 'این مشکل از چه زمانی شروع شد؟', options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم'] },
-  { question: 'مشکل در چه شرایطی بیشتر خود را نشان می‌دهد؟', options: ['فقط در استارت سرد', 'فقط پس از گرم شدن', 'در همه شرایط', 'فقط زیر بار / کارکرد سنگین'] },
-  { question: 'آیا چراغ هشداری روی پنل یا ال‌ای‌دی خطا روشن است؟', options: ['بله، هشدار فعال است', 'خیر، هیچ چراغی روشن نیست', 'مطمئن نیستم'] },
-  { question: 'وضعیت ولتاژ تغذیه و تغذیه ورودی چگونه است؟', options: ['ولتاژ در حد نرمال است', 'افت ولتاژ مشاهده می‌شود', 'تغذیه قطع است / تست نشده'] },
-];
-
-function demoNextStep(state) {
-  const qs = DEMO_QUESTIONS;
-  if (state.question_count >= qs.length) return { conclude: true };
-  const q = qs[state.question_count];
-  const hypos = [
-    { hypothesis: 'فرضیه نمونه ۱ (حالت دمو — بدون اتصال به هوش مصنوعی)', confidence: 55 - state.question_count * 3 },
-    { hypothesis: 'فرضیه نمونه ۲', confidence: 30 },
-  ];
-  return { ...q, system: state.system || 'other', leading_hypotheses: hypos, ruled_out: state.ruled_out };
-}
-
-function demoFinalReport(state) {
-  return {
-    root_causes: [
-      {
-        cause: 'این یک گزارش نمونه است — برای تحلیل واقعی توسط هوش مصنوعی، تنظیمات مدل را بررسی کنید.',
-        confidence: 50,
-        band: 'Medium',
-        evidence: 'حالت دمو: پاسخ‌ها در دیتابیس ثبت شد ولی پردازش زنده مدل انجام نشد.',
-      },
-    ],
-    five_whys: [
-      `چرا ۱: علامت ${state.symptom} رخ داد.`,
-      'چرا ۲: افت ولتاژ در مدار ایجاد شده است.',
-      'چرا ۳: مقاومت اهمی مسیر افزایش یافته است.',
-      'چرا ۴: قلع‌مردگی پایه قطعه وجود دارد.',
-      'چرا ۵: نیاز به کنترل دمای کوره SMT در خط مونتاژ.',
-    ],
-    eight_d_report: {
-      d1_team: 'تیم کیفیت و مهندسی خط تولید',
-      d2_problem: `گزارش عیب نمونه: ${state.symptom}`,
-      d3_containment: 'بررسی ۱۰۰٪ بردهای همان بچ تولیدی',
-      d4_root_cause: 'نقص لحیم‌کاری پایه آی‌سی بر اثر شوک حرارتی',
-      d5_corrective_actions: 'اصلاح پروفایل خمیر قلع و کوره Reflow',
-      d6_verification: 'تست تست‌بک ۱۰۰ عددی بدون خطا',
-      d7_prevention: 'بروزرسانی استانداردهای بازرسی چشمی AOI',
-      d8_closure: 'ثبت در دیتابیس و پایان پرونده 8D',
-    },
-    unresolved_conflicts: [],
-    recommended_actions: [
-      'بررسی اتصالات، تست ولتاژ و بازرسی میکروسکوپی/چشمی طبق نقشه‌ها',
-    ],
-    escalate_if: ['وجود هرگونه ریسک ایمنی'],
-    demo: true,
   };
 }
 
@@ -559,8 +502,8 @@ function applyStateUpdates(state, parsed) {
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
-    defaultProvider: 'gemini',
-    defaultModel: GEMINI_DEFAULT_MODEL,
+    defaultProvider: DEFAULT_PROVIDER,
+    bridgeUrl: BRIDGE_URL,
     hasGeminiKey: Boolean(ENV_GEMINI_KEY),
     hasDeepseekKey: Boolean(ENV_DEEPSEEK_KEY),
     maxQuestions: DEFAULT_MAX_QUESTIONS,
@@ -572,11 +515,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// One-Click Gemini Live Connection Test (ارتباط برقرار است؟)
+// One-Click Gemini Live Connection Test
 app.post('/api/gemini/test', async (req, res) => {
   try {
     const apiKey = (req.body?.apiKey || '').toString().trim() || ENV_GEMINI_KEY;
-    const model = (req.body?.model || '').toString().trim() || GEMINI_DEFAULT_MODEL;
+    const model = (req.body?.model || '').toString().trim() || 'gemini-1.5-flash';
     if (!apiKey) {
       return res.status(400).json({ ok: false, error: 'لطفاً ابتدا کلید Gemini API را وارد کنید.' });
     }
@@ -727,7 +670,7 @@ app.post('/api/part/analyze', async (req, res) => {
 
     const cfg = getLlmConfig(req);
     let analysis = null;
-    if (!cfg.offline && !cfg.demo && (cfg.apiKey || !cfg.needsKey)) {
+    if (!cfg.offline && (cfg.apiKey || !cfg.needsKey)) {
       try {
         analysis = await callJson({
           cfg,
@@ -763,48 +706,6 @@ app.post('/api/part/analyze', async (req, res) => {
       };
     }
     res.json({ ...base, analysis });
-  } catch (e) {
-    handleError(res, e);
-  }
-});
-
-// Refresh known issues
-app.post('/api/known-issues/refresh', async (req, res) => {
-  try {
-    const cfg = getLlmConfig(req);
-    if (cfg.demo || cfg.offline) return res.status(400).json({ error: 'offline_mode', detail: 'برای بروزرسانی آنلاین، اتصال اینترنت و مدل خارجی لازم است.' });
-    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
-
-    const onlyId = (req.body?.category_id || '').toString().trim();
-    const targets = (KNOWN_ISSUES.categories || []).filter((c) => !onlyId || c.id === onlyId);
-    if (!targets.length) return res.status(404).json({ error: 'category_not_found' });
-
-    const results = [];
-    for (const cat of targets.slice(0, 4)) {
-      const parsed = await callJson({
-        cfg,
-        model: cfg.chatModel,
-        system: ISSUE_UPDATER,
-        user: JSON.stringify({
-          category: cat.title_fa,
-          match: cat.match,
-          current_issues: cat.issues,
-          product: BOM_PRODUCT,
-          language: 'fa',
-        }),
-        temperature: 0.1,
-        maxTokens: 2500,
-      });
-      if (parsed && Array.isArray(parsed.issues) && parsed.issues.length) {
-        cat.issues = parsed.issues.filter((i) => i.issue_fa);
-        cat.updated_at = new Date().toISOString().slice(0, 10);
-        results.push({ id: cat.id, updated: true, count: cat.issues.length });
-      } else {
-        results.push({ id: cat.id, updated: false });
-      }
-    }
-    saveKnownIssues();
-    res.json({ ok: true, results, db_updated_at: KNOWN_ISSUES.updated_at });
   } catch (e) {
     handleError(res, e);
   }
@@ -1000,5 +901,5 @@ function handleError(res, e) {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Guided Diagnostic Assistant listening on http://0.0.0.0:${PORT} (Default Model: Google Gemini gemini-1.5-flash)`);
+  console.log(`Guided Diagnostic Assistant listening on http://0.0.0.0:${PORT} (Default Model: DeepSeek Selenium Chrome Bridge)`);
 });

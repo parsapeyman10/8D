@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>دستیار تخصصی عیب‌یابی و گزارش 8D — مجهز به Google Gemini</title>
+<title>دستیار عیب‌یابی و گزارش 8D — DeepSeek Selenium Chrome</title>
 <style>
   :root {
     --bg: #0f172a;
@@ -18,8 +18,8 @@
     --warn: #fbbf24;
     --danger: #f87171;
     --purple: #a855f7;
-    --gemini: #4285f4;
-    --gemini-grad: linear-gradient(135deg, #4285f4, #9b72cb, #d96570);
+    --deepseek: #0284c7;
+    --deepseek-grad: linear-gradient(135deg, #0284c7, #38bdf8);
     --radius: 14px;
   }
   * { box-sizing: border-box; }
@@ -40,9 +40,9 @@
   }
   header h1 { font-size: 16px; margin: 0; display:flex; align-items:center; gap:8px; }
   header h1 .logo { font-size: 20px; }
-  .gemini-badge {
-    background: var(--gemini-grad); color: #fff; font-size: 11px; font-weight: 700;
-    padding: 2px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px;
+  .engine-badge {
+    background: var(--deepseek-grad); color: #04121d; font-size: 11.5px; font-weight: 800;
+    padding: 3px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px;
   }
   .nav-tabs { display:flex; gap:6px; flex-wrap:wrap; }
   .nav-tabs button {
@@ -65,8 +65,6 @@
   button:active { transform: scale(.98); }
   button.primary { background: var(--accent-2); color: #04121d; font-weight: 700; }
   button.primary:hover { background: var(--accent); }
-  button.gemini-btn { background: var(--gemini-grad); color: #fff; font-weight: 700; border: none; }
-  button.gemini-btn:hover { opacity: .9; }
   button.success { background: var(--good); color: #04121d; font-weight: 700; }
   button.purple { background: var(--purple); color: #fff; font-weight: 700; }
   button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
@@ -108,7 +106,7 @@
 
   .progress { display:flex; align-items:center; gap:10px; margin-bottom: 14px; }
   .progress .bar { flex:1; height: 8px; border-radius: 999px; background: var(--panel-2); overflow:hidden; }
-  .progress .bar > div { height:100%; background: var(--gemini-grad); border-radius: 999px; transition: width .3s; }
+  .progress .bar > div { height:100%; background: var(--deepseek-grad); border-radius: 999px; transition: width .3s; }
   .progress span { font-size: 12px; color: var(--muted); white-space: nowrap; }
 
   .question-text { font-size: 16.5px; font-weight: 700; line-height: 2; margin: 4px 0 16px; }
@@ -229,7 +227,7 @@
 <header>
   <h1>
     <span class="logo">🔧</span> دستیار عیب‌یابی و گزارش 8D 
-    <span class="gemini-badge">⚡ Google Gemini 1.5 Flash</span>
+    <span class="engine-badge">🌐 DeepSeek Chrome Web Driver</span>
   </h1>
   <nav class="nav-tabs">
     <button class="active" id="tabDiagnosisBtn">🔧 عیب‌یابی</button>
@@ -240,7 +238,7 @@
   <div style="display:flex;align-items:center;gap:10px">
     <button id="uploadBomBtn" style="font-size:12px;padding:6px 10px" title="آپلود فایل اکسل BOM جدید">📁 آپلود BOM</button>
     <input type="file" id="bomFileInput" accept=".xlsx,.xls,.csv" style="display:none" />
-    <span class="key-status"><span id="keyDot" class="dot ok"></span><span id="keyText">Gemini Flash</span></span>
+    <span class="key-status"><span id="keyDot" class="dot ok"></span><span id="keyText">کروم DeepSeek</span></span>
     <button id="settingsBtn">⚙️ تنظیمات مدل</button>
   </div>
 </header>
@@ -249,12 +247,18 @@
   <section id="mainCol">
     <div id="errorBanner" class="error-banner"></div>
 
+    <!-- Live Bridge Banner -->
+    <div id="bridgeNotice" style="background:rgba(2,132,199,.1);border:1px solid var(--accent);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>🌐 <b>حالت فعال:</b> سوالات عیب‌یابی به صورت زنده از طریق پنجره باز <b>Google Chrome</b> به <b>DeepSeek</b> ارسال می‌شوند.</span>
+      <button id="testBridgeBtn" style="font-size:12px;padding:5px 10px;background:var(--accent-2);color:#04121d;font-weight:700">⚡ تست ارسال پیام</button>
+    </div>
+
     <!-- TAB 1: Guided Diagnosis -->
     <div class="tab-content active" id="tabDiagnosis">
       <!-- Start card -->
       <div class="card" id="startCard">
-        <h2>شروع عیب‌یابی هدایت‌شده با هوش مصنوعی</h2>
-        <p class="hint">علامت خرابی را بنویسید یا با دکمه میکروفون صحبت کنید. هوش مصنوعی <b>Google Gemini 1.5 Flash</b> همراه با پایگاه داده یادگیری، سوالات گزینه‌ای، درخت ۵ چرا و گزارش کامل 8D را استخراج می‌کند.</p>
+        <h2>شروع عیب‌یابی هدایت‌شده با DeepSeek</h2>
+        <p class="hint">علامت خرابی را بنویسید یا با دکمه میکروفون بگویید. پرامپت‌ها در پنجره باز کروم به هوش مصنوعی DeepSeek ارسال شده و پاسخ‌ها، درخت ۵ چرا و گزارش کامل 8D اینجا دریافت می‌شوند.</p>
         
         <div style="display:grid;grid-template-columns:1fr 180px;gap:10px;margin-bottom:10px">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -278,7 +282,7 @@
           <button data-ex="موتور در استارت سرد صدای تق‌تق می‌دهد">صدای تق‌تق استارت سرد</button>
           <button data-ex="کولر باد گرم می‌زند و خنک نمی‌کند">کولر خنک نمی‌کند</button>
         </div>
-        <button class="primary" id="startBtn">شروع عیب‌یابی</button>
+        <button class="primary" id="startBtn">شروع عیب‌یابی در پنجره کروم</button>
       </div>
 
       <!-- Question card -->
@@ -298,10 +302,10 @@
           </div>
         </div>
         <div class="q-actions">
-          <button id="concludeEarlyBtn" class="secondary">📊 دریافت گزارش نهایی هم‌اکنون</button>
+          <button id="concludeEarlyBtn" class="secondary">📊 صدور گزارش نهایی هم‌اکنون با DeepSeek</button>
           <button id="extendQuestionsBtn" class="secondary">➕ افزودن ۴ سوال تکمیلی (+۴)</button>
         </div>
-        <div class="loading-row hidden" id="qLoading"><span class="spinner"></span><span>در حال تحلیل و استنتاج با مدل Gemini...</span></div>
+        <div class="loading-row hidden" id="qLoading"><span class="spinner"></span><span>در حال ارسال سوال و دریافت پاسخ از DeepSeek در پنجره کروم...</span></div>
       </div>
 
       <!-- Escalation card -->
@@ -315,7 +319,7 @@
 
       <!-- Report card -->
       <div class="card report hidden" id="reportCard">
-        <h2>📋 گزارش تحلیلی عیب‌یابی (استنتاج هوش مصنوعی)</h2>
+        <h2>📋 گزارش تحلیلی عیب‌یابی (تحلیل کامل هوش مصنوعی DeepSeek)</h2>
         <p class="hint" id="reportSymptom"></p>
         
         <h3>علت(های) ریشه‌ای</h3>
@@ -388,9 +392,8 @@
         </div>
         <div style="display:flex;gap:10px;margin-top:10px">
           <button class="primary" id="partAnalyzeBtn">تحلیل قطعه</button>
-          <button id="issuesRefreshBtn" title="بروزرسانی دیتابیس ایرادات با کمک مدل">🔄 بروزرسانی ایرادات</button>
         </div>
-        <div class="loading-row hidden" id="partLoading"><span class="spinner"></span><span>در حال تحلیل قطعه...</span></div>
+        <div class="loading-row hidden" id="partLoading"><span class="spinner"></span><span>در حال تحلیل قطعه در پنجره DeepSeek...</span></div>
         <div id="partResult" style="margin-top:14px"></div>
       </div>
     </div>
@@ -484,97 +487,59 @@
   <div class="modal">
     <h2>تنظیمات مدل هوش مصنوعی</h2>
     <div class="provider-tabs">
-      <label><input type="radio" name="provider" value="gemini" checked /> ⚡ <b>Google Gemini (پیش‌فرض سیستم — gemini-1.5-flash)</b></label>
-      <label><input type="radio" name="provider" value="offline" /> 🔌 موتور هوش مصنوعی آفلاین (بدون اینترنت و بدون فیلترشکن)</label>
-      <label><input type="radio" name="provider" value="cloud" /> ☁️ سایر سرویس‌های ابری (DeepSeek / AvalAI / Groq / OpenAI)</label>
-      <label><input type="radio" name="provider" value="local" /> 🦙 مدل‌های محلی سیستم (Ollama / LM Studio)</label>
-      <label><input type="radio" name="provider" value="bridge" /> 🌐 مرورگر کروم / پل وب</label>
+      <label><input type="radio" name="provider" value="bridge" checked /> 🌐 <b>مرورگر کروم و پل وب DeepSeek (پیش‌فرض اصلی سیستم)</b></label>
+      <label><input type="radio" name="provider" value="gemini" /> ⚡ Google Gemini (gemini-1.5-flash)</label>
+      <label><input type="radio" name="provider" value="offline" /> 🔌 موتور هوش مصنوعی آفلاین (بدون اینترنت)</label>
+      <label><input type="radio" name="provider" value="cloud" /> ☁️ سایر سرویس‌های ابری (API Key)</label>
+      <label><input type="radio" name="provider" value="local" /> 🦙 مدل‌های محلی سیستم (Ollama)</label>
     </div>
 
-    <!-- Gemini Fields (Default) -->
-    <div id="geminiFields">
-      <div style="background:rgba(66,133,244,.08);border:1px solid var(--gemini);border-radius:10px;padding:12px;font-size:13px;line-height:1.9;margin-bottom:12px">
-        <b style="color:var(--accent)">🌟 مدل پیش‌فرض: Google Gemini 1.5 Flash</b><br>
-        سریع‌ترین، دقیق‌ترین و اقتصادی‌ترین مدل با پشتیبانی کامل از زبان فارسی و تولید فرمت‌های ساختاریافته 8D و ۵ چرا.
+    <!-- Bridge Fields (Default) -->
+    <div id="bridgeFields">
+      <div style="background:rgba(2,132,199,.08);border:1px solid var(--accent);border-radius:10px;padding:12px;font-size:13px;line-height:1.9;margin-bottom:12px">
+        <b style="color:var(--accent)">🌐 حالت پیش‌فرض: پنجره باز Google Chrome برای DeepSeek</b><br>
+        با اجرای برنامه، پنجره کروم به سایت chat.deepseek.com متصل شده و سوالات عیب‌یابی را مستقیماً از هوش مصنوعی دریافت می‌کند.
       </div>
+      <label class="fld">آدرس پل ارتباطی
+        <input type="text" id="bridgeUrlInput" value="http://localhost:8765/v1" dir="ltr" />
+      </label>
+    </div>
+
+    <!-- Gemini Fields -->
+    <div id="geminiFields" style="display:none">
       <label class="fld">کلید Google Gemini API
         <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." autocomplete="off" />
       </label>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
-        کلید رایگان از: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent)">Google AI Studio (دریافت فوری)</a>
-      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <label class="fld">نسخه مدل سوالات (Tier 1)
+        <label class="fld">نسخه مدل
           <select id="geminiModelSelect">
-            <option value="gemini-1.5-flash" selected>gemini-1.5-flash (سریع و استاندارد)</option>
-            <option value="gemini-2.0-flash">gemini-2.0-flash (نسل جدید)</option>
-            <option value="gemini-1.5-pro">gemini-1.5-pro (تحلیل عمیق مهندسی)</option>
-          </select>
-        </label>
-        <label class="fld">مدل گزارش نهایی (Tier 2)
-          <select id="geminiReasonerSelect">
             <option value="gemini-1.5-flash" selected>gemini-1.5-flash</option>
-            <option value="gemini-1.5-pro">gemini-1.5-pro (استنتاج عمیق 8D)</option>
             <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
           </select>
         </label>
       </div>
-      <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
-        <button type="button" class="gemini-btn" id="testGeminiBtn" style="font-size:12.5px;padding:7px 14px">⚡ تست اتصال زنده («ارتباط برقرار است؟»)</button>
-        <span id="geminiTestStatus" style="font-size:12.5px"></span>
-      </div>
-      <div id="geminiTestResultBox" style="display:none;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:10px;font-size:13px;line-height:1.8"></div>
     </div>
 
     <!-- Offline Fields -->
     <div id="offlineFields" style="display:none">
       <div style="background:rgba(52,211,153,.08);border:1px solid var(--good);border-radius:10px;padding:12px;font-size:13px;line-height:1.9">
-        <b style="color:var(--good)">✅ حالت مستقل ۱۰۰٪ آفلاین:</b><br>
-        استفاده از موتور تخصصی خودرویی داخلی با کدهای DTC، نقشه‌های پین‌اوت و دیتابیس یادگیری بدون نیاز به اینترنت.
+        <b style="color:var(--good)">✅ حالت مستقل ۱۰۰٪ آفلاین:</b> اجرای محلی بدون نیاز به هیچ‌گونه اینترنت.
       </div>
     </div>
 
     <!-- Cloud Fields -->
     <div id="cloudFields" style="display:none">
-      <label class="fld">سرویس‌دهنده API
-        <select id="cloudPreset">
-          <option value="avalai">AvalAI (درگاه ایرانی بدون تحریم)</option>
-          <option value="gapgpt">GapGPT (درگاه ایرانی - پرداخت ریالی)</option>
-          <option value="deepseek">DeepSeek (رسمی)</option>
-          <option value="openrouter">OpenRouter (دارای مدل‌های رایگان :free)</option>
-          <option value="groq">Groq (بسیار سریع و پلن رایگان)</option>
-          <option value="openai">OpenAI (ChatGPT)</option>
-          <option value="custom">سفارشی (Custom OpenAI URL)</option>
-        </select>
+      <label class="fld">کلید API
+        <input type="password" id="apiKeyInput" placeholder="کلید API..." autocomplete="off" />
       </label>
-      <p class="hint" id="presetHint"></p>
-      <input type="password" id="apiKeyInput" placeholder="کلید API..." autocomplete="off" />
       <label class="fld" style="margin-top:10px">آدرس سرور (Base URL)
-        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.avalai.ir/v1" dir="ltr" />
-      </label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <label class="fld">مدل سوالات (Tier 1)
-          <input type="text" id="cloudChatModelInput" placeholder="gpt-4o-mini" dir="ltr" />
-        </label>
-        <label class="fld">مدل گزارش (Tier 2)
-          <input type="text" id="cloudReasonerModelInput" placeholder="خالی = همان مدل" dir="ltr" />
-        </label>
-      </div>
-    </div>
-
-    <!-- Bridge Fields -->
-    <div id="bridgeFields" style="display:none">
-      <div style="background:rgba(56,189,248,.08);border:1px solid var(--accent);border-radius:10px;padding:12px;font-size:13px;line-height:1.9;margin-bottom:12px">
-        <b>🌐 اتصال از طریق پل مرورگر:</b> شناسایی خودکار پروکسی محلی (V2Ray / Clash).
-      </div>
-      <label class="fld">آدرس پل
-        <input type="text" id="bridgeUrlInput" placeholder="http://localhost:8765/v1" dir="ltr" />
+        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.deepseek.com" dir="ltr" />
       </label>
     </div>
 
     <!-- Local Fields -->
     <div id="localFields" style="display:none">
-      <p class="hint">اجرای مدل‌های هوش مصنوعی روی سیستم خودتان با Ollama یا LM Studio.</p>
       <label class="fld">آدرس سرور لوکال
         <input type="text" id="baseUrlInput" placeholder="http://localhost:11434/v1" dir="ltr" />
       </label>
@@ -585,7 +550,7 @@
 
     <div class="modal-actions">
       <button class="primary" id="saveKeyBtn">ذخیره تنظیمات</button>
-      <button id="clearKeyBtn">بازنشانی به Gemini پیش‌فرض</button>
+      <button id="clearKeyBtn">بازنشانی به پیش‌فرض (کروم DeepSeek)</button>
       <button id="closeModalBtn">بستن</button>
     </div>
   </div>

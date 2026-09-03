@@ -1,11 +1,11 @@
-// Guided Diagnostic Assistant — Advanced Frontend with 8D Quality Engine, Gemini AI & Learning Database
+// Guided Diagnostic Assistant — Advanced Frontend with 8D Quality Engine, DeepSeek Chrome & Learning Database
 const $ = (id) => document.getElementById(id);
 
 const els = {
   keyDot: $('keyDot'), keyText: $('keyText'),
   settingsBtn: $('settingsBtn'), settingsModal: $('settingsModal'),
-  geminiApiKeyInput: $('geminiApiKeyInput'), geminiModelSelect: $('geminiModelSelect'), geminiReasonerSelect: $('geminiReasonerSelect'),
-  testGeminiBtn: $('testGeminiBtn'), geminiTestStatus: $('geminiTestStatus'), geminiTestResultBox: $('geminiTestResultBox'),
+  testBridgeBtn: $('testBridgeBtn'), bridgeNotice: $('bridgeNotice'),
+  geminiApiKeyInput: $('geminiApiKeyInput'), geminiModelSelect: $('geminiModelSelect'),
   apiKeyInput: $('apiKeyInput'), saveKeyBtn: $('saveKeyBtn'), clearKeyBtn: $('clearKeyBtn'), closeModalBtn: $('closeModalBtn'),
   errorBanner: $('errorBanner'),
   startCard: $('startCard'), symptomInput: $('symptomInput'), dtcInput: $('dtcInput'), dtcList: $('dtcList'),
@@ -134,35 +134,27 @@ function getConfig() {
   try {
     const c = JSON.parse(localStorage.getItem('llm_config') || '{}');
     return {
-      provider: c.provider || 'gemini', // Default is Google Gemini
+      provider: c.provider || 'bridge', // Default is DeepSeek Chrome Bridge
+      bridgeUrl: c.bridgeUrl || 'http://localhost:8765/v1',
       geminiApiKey: c.geminiApiKey || localStorage.getItem('gemini_api_key') || '',
       geminiModel: c.geminiModel || 'gemini-1.5-flash',
-      geminiReasonerModel: c.geminiReasonerModel || 'gemini-1.5-flash',
       apiKey: c.apiKey || '',
       baseUrl: c.baseUrl || '',
-      bridgeUrl: c.bridgeUrl || 'http://localhost:8765/v1',
       chatModel: c.chatModel || '',
-      reasonerModel: c.reasonerModel || '',
-      cloudPreset: c.cloudPreset || 'avalai',
       cloudBaseUrl: c.cloudBaseUrl || '',
       cloudChatModel: c.cloudChatModel || '',
-      cloudReasonerModel: c.cloudReasonerModel || '',
     };
   } catch {
     return {
-      provider: 'gemini',
+      provider: 'bridge',
+      bridgeUrl: 'http://localhost:8765/v1',
       geminiApiKey: '',
       geminiModel: 'gemini-1.5-flash',
-      geminiReasonerModel: 'gemini-1.5-flash',
       apiKey: '',
       baseUrl: '',
-      bridgeUrl: 'http://localhost:8765/v1',
       chatModel: '',
-      reasonerModel: '',
-      cloudPreset: 'avalai',
       cloudBaseUrl: '',
       cloudChatModel: '',
-      cloudReasonerModel: '',
     };
   }
 }
@@ -173,174 +165,108 @@ function saveConfig(c) {
 
 function configReady() {
   const c = getConfig();
-  if (c.provider === 'gemini') return true; // Can run or fallback seamlessly
-  if (c.provider === 'offline' || c.provider === 'local' || c.provider === 'bridge' || c.provider === 'demo') {
-    return true;
-  }
+  if (c.provider === 'bridge' || c.provider === 'offline' || c.provider === 'local') return true;
+  if (c.provider === 'gemini') return true;
   return Boolean(c.apiKey) || serverHasKey;
 }
 
 function refreshKeyStatus() {
   const c = getConfig();
   const ok = configReady();
-  const presetNames = {
-    gemini: 'Gemini 1.5 Flash ⚡',
-    offline: 'موتور آفلاین 🔌',
-    avalai: 'AvalAI (ایرانی)',
-    gapgpt: 'GapGPT (ایرانی)',
-    deepseek: 'DeepSeek',
-    openrouter: 'OpenRouter',
-    groq: 'Groq',
-    gemini_cloud: 'Gemini',
-    openai: 'OpenAI',
-    custom: 'سفارشی',
-  };
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
-    c.provider === 'gemini' ? (c.geminiModel ? `Gemini (${c.geminiModel.replace('gemini-', '')})` : 'Gemini Flash ⚡')
+    c.provider === 'bridge' ? 'کروم DeepSeek 🌐'
+    : c.provider === 'gemini' ? 'Gemini ⚡'
     : c.provider === 'offline' ? 'موتور آفلاین 🔌'
-    : c.provider === 'bridge' ? 'پل کروم 🌐'
     : c.provider === 'local' ? 'مدل محلی 🦙'
-    : ok ? (presetNames[c.cloudPreset] || 'ابری')
+    : ok ? 'سرویس ابری ☁️'
     : 'تنظیم نشده';
+
+  if (els.bridgeNotice) {
+    els.bridgeNotice.style.display = c.provider === 'bridge' ? 'flex' : 'none';
+  }
 }
 
 fetch('/api/health').then(r => r.json()).then(d => {
-  serverHasKey = Boolean(d.hasGeminiKey || d.hasEnvKey);
+  serverHasKey = Boolean(d.hasGeminiKey || d.hasDeepseekKey);
   refreshKeyStatus();
   if (d.dbStats) updateDbStats(d.dbStats);
 }).catch(() => {});
 
 const providerRadios = () => [...document.querySelectorAll('input[name="provider"]')];
+const bridgeFields = document.getElementById('bridgeFields');
 const geminiFields = document.getElementById('geminiFields');
 const offlineFields = document.getElementById('offlineFields');
 const cloudFields = document.getElementById('cloudFields');
 const localFields = document.getElementById('localFields');
-const bridgeFields = document.getElementById('bridgeFields');
-const baseUrlInput = document.getElementById('baseUrlInput');
 const bridgeUrlInput = document.getElementById('bridgeUrlInput');
+const baseUrlInput = document.getElementById('baseUrlInput');
 const chatModelInput = document.getElementById('chatModelInput');
-const cloudPreset = document.getElementById('cloudPreset');
-const presetHint = document.getElementById('presetHint');
 const cloudBaseUrlInput = document.getElementById('cloudBaseUrlInput');
 const cloudChatModelInput = document.getElementById('cloudChatModelInput');
-const cloudReasonerModelInput = document.getElementById('cloudReasonerModelInput');
-
-const PRESETS = {
-  avalai:     { base: 'https://api.avalai.ir/v1',                                chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://avalai.ir', hint: 'درگاه ایرانی بدون تحریم و بدون نیاز به VPN.' },
-  gapgpt:     { base: 'https://api.gapgpt.app/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://gapgpt.app', hint: 'درگاه ایرانی با پرداخت ریالی.' },
-  deepseek:   { base: 'https://api.deepseek.com',                                chat: 'deepseek-chat', reasoner: 'deepseek-reasoner', keyUrl: 'https://platform.deepseek.com', hint: 'سرویس رسمی DeepSeek.' },
-  openrouter: { base: 'https://openrouter.ai/api/v1',                            chat: 'deepseek/deepseek-chat-v3.1:free', reasoner: '', keyUrl: 'https://openrouter.ai/keys', hint: 'دارای مدل‌های رایگان :free.' },
-  groq:       { base: 'https://api.groq.com/openai/v1',                          chat: 'llama-3.3-70b-versatile', reasoner: '', keyUrl: 'https://console.groq.com/keys', hint: 'فوق‌العاده سریع با پلن رایگان.' },
-  openai:     { base: 'https://api.openai.com/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://platform.openai.com/api-keys', hint: 'سرویس رسمی OpenAI.' },
-  custom:     { base: '', chat: '', reasoner: '', keyUrl: '', hint: 'هر سرور سازگار با OpenAI.' },
-};
-
-function applyPreset(id, keepValues = false) {
-  const p = PRESETS[id] || PRESETS.custom;
-  if (presetHint) presetHint.innerHTML = `${p.hint}${p.keyUrl ? ` دریافت کلید: <a href="${p.keyUrl}" target="_blank" rel="noopener" dir="ltr">${p.keyUrl.replace('https://', '')}</a>` : ''}`;
-  if (!keepValues && cloudBaseUrlInput) {
-    cloudBaseUrlInput.value = p.base;
-    cloudChatModelInput.value = p.chat;
-    cloudReasonerModelInput.value = p.reasoner;
-  }
-}
-if (cloudPreset) cloudPreset.addEventListener('change', () => applyPreset(cloudPreset.value));
 
 function syncProviderFields() {
-  const p = providerRadios().find(r => r.checked)?.value || 'gemini';
+  const p = providerRadios().find(r => r.checked)?.value || 'bridge';
+  if (bridgeFields) bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
   if (geminiFields) geminiFields.style.display = p === 'gemini' ? 'block' : 'none';
   if (offlineFields) offlineFields.style.display = p === 'offline' ? 'block' : 'none';
   if (cloudFields) cloudFields.style.display = p === 'cloud' ? 'block' : 'none';
   if (localFields) localFields.style.display = p === 'local' ? 'block' : 'none';
-  if (bridgeFields) bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
 }
 providerRadios().forEach(r => r.addEventListener('change', syncProviderFields));
 
 els.settingsBtn.onclick = () => {
   const c = getConfig();
   providerRadios().forEach(r => r.checked = (r.value === c.provider));
+  if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || 'http://localhost:8765/v1';
   if (els.geminiApiKeyInput) els.geminiApiKeyInput.value = c.geminiApiKey || '';
   if (els.geminiModelSelect) els.geminiModelSelect.value = c.geminiModel || 'gemini-1.5-flash';
-  if (els.geminiReasonerSelect) els.geminiReasonerSelect.value = c.geminiReasonerModel || 'gemini-1.5-flash';
-  if (els.apiKeyInput) els.apiKeyInput.value = c.apiKey;
+  if (els.apiKeyInput) els.apiKeyInput.value = c.apiKey || '';
   if (baseUrlInput) baseUrlInput.value = c.baseUrl || 'http://localhost:11434/v1';
-  if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || 'http://localhost:8765/v1';
   if (chatModelInput) chatModelInput.value = c.chatModel || 'deepseek-r1:8b';
-  if (cloudPreset) {
-    cloudPreset.value = c.cloudPreset || 'avalai';
-    applyPreset(cloudPreset.value, true);
-  }
-  if (cloudBaseUrlInput) cloudBaseUrlInput.value = c.cloudBaseUrl || PRESETS[cloudPreset?.value || 'avalai']?.base || '';
-  if (cloudChatModelInput) cloudChatModelInput.value = c.cloudChatModel || PRESETS[cloudPreset?.value || 'avalai']?.chat || '';
-  if (cloudReasonerModelInput) cloudReasonerModelInput.value = c.cloudReasonerModel || PRESETS[cloudPreset?.value || 'avalai']?.reasoner || '';
-  if (els.geminiTestStatus) els.geminiTestStatus.textContent = '';
-  if (els.geminiTestResultBox) els.geminiTestResultBox.style.display = 'none';
+  if (cloudBaseUrlInput) cloudBaseUrlInput.value = c.cloudBaseUrl || 'https://api.deepseek.com';
+  if (cloudChatModelInput) cloudChatModelInput.value = c.cloudChatModel || 'deepseek-chat';
   syncProviderFields();
   els.settingsModal.classList.add('show');
 };
 els.closeModalBtn.onclick = () => els.settingsModal.classList.remove('show');
 
 els.saveKeyBtn.onclick = () => {
-  const provider = providerRadios().find(r => r.checked)?.value || 'gemini';
+  const provider = providerRadios().find(r => r.checked)?.value || 'bridge';
   saveConfig({
     provider,
+    bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : 'http://localhost:8765/v1',
     geminiApiKey: els.geminiApiKeyInput ? els.geminiApiKeyInput.value.trim() : '',
     geminiModel: els.geminiModelSelect ? els.geminiModelSelect.value : 'gemini-1.5-flash',
-    geminiReasonerModel: els.geminiReasonerSelect ? els.geminiReasonerSelect.value : 'gemini-1.5-flash',
     apiKey: els.apiKeyInput ? els.apiKeyInput.value.trim() : '',
     baseUrl: baseUrlInput ? baseUrlInput.value.trim() : '',
-    bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : 'http://localhost:8765/v1',
     chatModel: chatModelInput ? chatModelInput.value.trim() : '',
-    cloudPreset: cloudPreset ? cloudPreset.value : 'avalai',
     cloudBaseUrl: cloudBaseUrlInput ? cloudBaseUrlInput.value.trim() : '',
     cloudChatModel: cloudChatModelInput ? cloudChatModelInput.value.trim() : '',
-    cloudReasonerModel: cloudReasonerModelInput ? cloudReasonerModelInput.value.trim() : '',
   });
   els.settingsModal.classList.remove('show');
   refreshKeyStatus();
 };
 
 els.clearKeyBtn.onclick = () => {
-  saveConfig({
-    provider: 'gemini',
-    geminiModel: 'gemini-1.5-flash',
-    geminiReasonerModel: 'gemini-1.5-flash',
-  });
-  providerRadios().forEach(r => r.checked = (r.value === 'gemini'));
+  saveConfig({ provider: 'bridge', bridgeUrl: 'http://localhost:8765/v1' });
+  providerRadios().forEach(r => r.checked = (r.value === 'bridge'));
   syncProviderFields();
   refreshKeyStatus();
 };
 
-// ---------- TEST GEMINI CONNECTION ("ارتباط برقرار است؟") ----------
-if (els.testGeminiBtn) {
-  els.testGeminiBtn.onclick = async () => {
-    const apiKey = els.geminiApiKeyInput ? els.geminiApiKeyInput.value.trim() : '';
-    const model = els.geminiModelSelect ? els.geminiModelSelect.value : 'gemini-1.5-flash';
-    if (!apiKey) {
-      els.geminiTestStatus.innerHTML = '<span style="color:var(--danger)">⚠️ لطفاً ابتدا کلید Gemini را وارد کنید.</span>';
-      return;
-    }
-    els.geminiTestStatus.innerHTML = '<span class="spinner"></span> در حال ارسال پیام به Gemini...';
-    els.geminiTestBtn.disabled = true;
+// Test DeepSeek Bridge Live Button
+if (els.testBridgeBtn) {
+  els.testBridgeBtn.onclick = async () => {
+    setLoading(true, 'در حال ارسال پرامپت تستی به پنجره باز Google Chrome برای DeepSeek...');
     try {
-      const res = await fetch('/api/gemini/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, model }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        els.geminiTestStatus.innerHTML = `<span style="color:var(--good);font-weight:700">✅ ارتباط برقرار است! (تاخیر: ${data.latency} میلی‌ثانیه)</span>`;
-        els.geminiTestResultBox.style.display = 'block';
-        els.geminiTestResultBox.innerHTML = `<b>پاسخ دریافت شده از ${esc(data.model)}:</b><br><span style="color:var(--accent)">"${esc(data.text)}"</span>`;
-      } else {
-        els.geminiTestStatus.innerHTML = `<span style="color:var(--danger)">❌ خطا: ${esc(data.error)}</span>`;
-      }
+      const res = await api('/api/session/start', { symptom: 'تست اولیه ارتباط با DeepSeek در پنجره کروم', use_bom: false, max_questions: 1 });
+      alert('🎉 ارتباط با DeepSeek در پنجره کروم برقرار است!\nاولین سوال توسط مدل مطرح شد: ' + (res.question || 'پاسخ دریافت شد.'));
+      location.reload();
     } catch (e) {
-      els.geminiTestStatus.innerHTML = `<span style="color:var(--danger)">❌ خطا در اتصال: ${esc(e.message)}</span>`;
+      showError('خطا در ارتباط با پنجره کروم: ' + e.message);
     } finally {
-      els.testGeminiBtn.disabled = false;
+      setLoading(false);
     }
   };
 }
@@ -355,28 +281,23 @@ function showError(msg) {
 function hideError() { els.errorBanner.classList.remove('show'); }
 
 function errorMessage(err, status) {
-  if (status === 401 && err?.error === 'missing_api_key')
-    return 'کلید API تنظیم نشده است. می‌توانید در تنظیمات کلید Gemini را وارد کنید یا حالت «موتور آفلاین» را انتخاب نمایید.';
-  if (status === 401) return 'کلید API وارد شده نامعتبر است.';
-  if (status === 429) return 'محدودیت درخواست‌های API (Rate Limit) به پایان رسیده است.';
-  if (status === 502) return 'اتصال به مدل ابری برقرار نشد. سیستم به صورت خودکار با موتور آفلاین کار خواهد کرد.';
-  return 'خطا در ارتباط با سرور: ' + (err?.detail || err?.error || status || 'نامشخص');
+  if (status === 502) return 'اتصال به پل وب کروم برقرار نشد. پنجره کروم را باز نگه دارید یا از موتور آفلاین استفاده کنید.';
+  return 'خطا: ' + (err?.detail || err?.error || status || 'نامشخص');
 }
 
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   const c = getConfig();
 
-  if (c.provider === 'gemini') {
+  if (c.provider === 'bridge') {
+    headers['x-provider'] = 'bridge';
+    headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
+  } else if (c.provider === 'gemini') {
     headers['x-provider'] = 'gemini';
     if (c.geminiApiKey) headers['x-gemini-key'] = c.geminiApiKey;
     if (c.geminiModel) headers['x-chat-model'] = c.geminiModel;
-    if (c.geminiReasonerModel) headers['x-reasoner-model'] = c.geminiReasonerModel;
   } else if (c.provider === 'offline') {
     headers['x-provider'] = 'offline';
-  } else if (c.provider === 'bridge') {
-    headers['x-provider'] = 'bridge';
-    headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
   } else if (c.provider === 'local') {
     headers['x-provider'] = 'local';
     if (c.baseUrl) headers['x-base-url'] = c.baseUrl;
@@ -386,8 +307,6 @@ async function api(path, body) {
     if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
     if (c.cloudBaseUrl) headers['x-base-url'] = c.cloudBaseUrl;
     if (c.cloudChatModel) headers['x-chat-model'] = c.cloudChatModel;
-    const reasoner = c.cloudReasonerModel || c.cloudChatModel;
-    if (reasoner) headers['x-reasoner-model'] = reasoner;
   }
 
   const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -478,7 +397,7 @@ function renderQuestion(data) {
   pendingFallbackOption = null;
 
   const n = data.questionNumber, max = data.maxQuestions || 8;
-  els.qCounter.textContent = `سوال ${faDigits(n)} از ${faDigits(max)} (امکان پرسش بیشتر وجود دارد)`;
+  els.qCounter.textContent = `سوال ${faDigits(n)} از ${faDigits(max)} (استخراج شده با DeepSeek)`;
   els.progressFill.style.width = `${Math.min(100, ((n - 1) / max) * 100)}%`;
 
   const sys = data.state?.system;
@@ -601,7 +520,7 @@ D6. صحه‌گذاری و تست: ${d.d6_verification}
 D7. پیشگیری از تکرار: ${d.d7_prevention}
 D8. تایید و بستن پرونده: ${d.d8_closure}
 =======================================================`;
-  navigator.clipboard.writeText(text).then(() => alert('گزارش 8D با موفقیت در کلیپ‌بورد کپی شد!'));
+  navigator.clipboard.writeText(text).then(() => alert('گزارش 8D در کلیپ‌بورد کپی شد!'));
 };
 
 // ---------- ACTIONS ----------
@@ -611,7 +530,7 @@ async function startSession() {
   if (!symptom && !dtc) { showError('لطفاً ابتدا علامت یا کد خطای دیاگ (DTC) را وارد کنید.'); return; }
   hideError();
   els.startBtn.disabled = true;
-  setLoading(true, 'در حال جستجو در دیتابیس یادگیری و استنتاج با مدل Gemini...');
+  setLoading(true, 'در حال ارسال سوال به پنجره باز Google Chrome برای هوش مصنوعی DeepSeek...');
   try {
     const use_bom = Boolean(els.useBomCheckbox.checked);
     const data = await api('/api/session/start', { symptom, dtc, use_bom, max_questions: 8 });
@@ -644,7 +563,7 @@ async function submitAnswer(answer, freeText) {
 async function extendQuestions() {
   if (!sessionId) return;
   hideError();
-  setLoading(true, 'در حال فرمول‌بندی سوالات تکمیلی عمیق‌تر با هوش مصنوعی...');
+  setLoading(true, 'در حال ارسال درخواست به DeepSeek در پنجره کروم...');
   try {
     const data = await api('/api/session/extend', { sessionId, extend_by: 4 });
     handleResponse(data);
@@ -658,7 +577,7 @@ async function extendQuestions() {
 async function concludeEarly() {
   if (!sessionId) return;
   hideError();
-  setLoading(true, 'در حال استنتاج نهایی، تولید زنجیره ۵ چرا و گزارش کامل 8D با Gemini...');
+  setLoading(true, 'در حال استنتاج نهایی و دریافت گزارش 8D از DeepSeek در پنجره کروم...');
   try {
     const data = await api('/api/session/conclude', { sessionId });
     handleResponse(data);
@@ -721,7 +640,7 @@ document.querySelectorAll('.examples button').forEach(b => {
 
 // ---------- PART ANALYSIS ----------
 const partNameInput = $('partNameInput'), partNoInput = $('partNoInput'), partUseBomCheckbox = $('partUseBomCheckbox');
-const partAnalyzeBtn = $('partAnalyzeBtn'), issuesRefreshBtn = $('issuesRefreshBtn');
+const partAnalyzeBtn = $('partAnalyzeBtn');
 const partLoading = $('partLoading'), partResult = $('partResult');
 
 fetch('/api/bom').then(r => r.json()).then(d => {

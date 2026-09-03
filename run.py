@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-اجراکننده خودکار و یکپارچه «دستیار عیب‌یابی هدایت‌شده و گزارش 8D»
-==================================================================
- 1. باز کردن قطعی و خودکار برنامه در مرورگر Google Chrome
- 2. بررسی و نصب خودکار وابستگی‌های پایتون (Flask, Selenium) و Node.js
- 3. راه‌اندازی پل وب سلنیوم DeepSeek (پورت 8765)
- 4. راه‌اندازی سرور اصلی و پایگاه دانش (پورت 3000)
+اجراکننده یکپارچه «دستیار عیب‌یابی هدایت‌شده و گزارش 8D»
+==========================================================
+ 1. باز کردن پنجره اختصاصی Google Chrome برای DeepSeek (پل سلنیوم)
+ 2. راه‌اندازی سرور اصلی و پایگاه دانش یادگیری (پورت 3000)
+ 3. باز کردن خودکار داشبورد وب در مرورگر Google Chrome
 """
 
 import os
@@ -16,8 +15,7 @@ import sys
 import time
 import webbrowser
 
-os.environ["LLM_PROVIDER"] = os.environ.get("LLM_PROVIDER", "gemini")
-os.environ["GEMINI_MODEL"] = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+os.environ["LLM_PROVIDER"] = "bridge"  # پل وب سلنیومی کروم به عنوان پیش‌فرض اصلی
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(HERE, "app")
@@ -68,13 +66,12 @@ def open_in_chrome(url):
     """باز کردن قطعی آدرس در مرورگر Google Chrome"""
     chrome_path = find_chrome_executable()
     if chrome_path:
-        say(f"🌐 در حال باز کردن برنامه در Google Chrome: {chrome_path}")
+        say(f"🌐 در حال باز کردن داشبورد در Google Chrome: {chrome_path}")
         try:
             subprocess.Popen([chrome_path, url])
             return True
-        except Exception as e:
-            say(f"⚠️ باز کردن مستقیم کروم با خطا مواجه شد ({e})، استفاده از مرورگر پیش‌فرض...")
-    
+        except Exception:
+            pass
     try:
         webbrowser.open(url)
         return True
@@ -89,7 +86,7 @@ def port_open(port):
 
 
 def ensure_python_deps():
-    """بررسی و نصب خودکار Flask و Selenium در پایتون برای کارکرد بدون دردسر پل"""
+    """بررسی و نصب خودکار وابستگی‌های پایتون"""
     missing = []
     try: import flask # noqa
     except ImportError: missing.append("flask")
@@ -103,7 +100,7 @@ def ensure_python_deps():
             say("✅ پکیج‌های پایتون با موفقیت نصب شدند.")
             return True
         except Exception as e:
-            say(f"⚠️ نصب خودکار پکیج‌های پایتون با خطا مواجه شد: {e}")
+            say(f"⚠️ نصب خودکار با خطا مواجه شد: {e}")
             return False
     return True
 
@@ -113,23 +110,23 @@ def deps_ok():
 
 
 def install_node_deps(npm):
-    say("📦 در حال بررسی و نصب وابستگی‌های Node.js...")
+    say("📦 در حال بررسی وابستگی‌های Node.js...")
     r = subprocess.run([npm, "install", "--no-audit", "--no-fund"], cwd=APP_DIR)
     if r.returncode != 0 or not deps_ok():
         fail("نصب وابستگی‌های Node.js ناموفق بود.")
-    say("✅ وابستگی‌های Node.js نصب شد.")
+    say("✅ وابستگی‌های Node.js آماده است.")
 
 
 def start_bridge():
     if not os.path.isfile(BRIDGE_SCRIPT):
         return None
     ensure_python_deps()
-    say("🌐 در حال راه‌اندازی پل وب DeepSeek و مرورگر کروم...")
+    say("🚀 در حال باز کردن پنجره Google Chrome و اتصال به DeepSeek...")
     try:
         proc = subprocess.Popen([sys.executable, BRIDGE_SCRIPT], cwd=os.path.dirname(BRIDGE_SCRIPT))
         return proc
     except Exception as e:
-        say(f"⚠️ اجرای پل وب با خطا مواجه شد: {e}")
+        say(f"⚠️ بالا آوردن پل با خطا مواجه شد: {e}")
         return None
 
 
@@ -138,23 +135,18 @@ def start_server(node):
 
 
 def main():
-    say("=" * 68)
-    say("  🔧 دستیار تخصصی عیب‌یابی خودرو و گزارش کیفیت 8D")
-    say("  🌐 اجرا در Google Chrome + پشتیبانی از پل سلنیوم و Google Gemini")
-    say("=" * 68)
+    say("=" * 70)
+    say("  🔧 دستیار تخصصی عیب‌یابی و گزارش 8D")
+    say("  🌐 اتصال زنده و نمایان به DeepSeek از طریق وب‌درایور Google Chrome")
+    say("=" * 70)
 
     if not os.path.isdir(APP_DIR):
-        fail("پوشه app پیدا نشد. این فایل باید در ریشه پروژه قرار داشته باشد.")
+        fail("پوشه app پیدا نشد.")
 
     node = find("node")
     npm = find("npm")
     if not node or not npm:
-        fail(
-            "Node.js روی سیستم شما نصب نیست.\n"
-            "   از آدرس https://nodejs.org نسخه LTS را نصب کنید."
-        )
-    ver = subprocess.run([node, "-v"], capture_output=True, text=True).stdout.strip()
-    say(f"✅ Node.js پیدا شد: {ver}")
+        fail("Node.js روی سیستم شما نصب نیست. لطفاً نسخه LTS را نصب نمایید.")
 
     if not deps_ok():
         install_node_deps(npm)
@@ -163,72 +155,51 @@ def main():
     server_proc = None
 
     try:
-        # ۱. اجرای پل سلنیوم در پس‌زمینه
+        # ۱. اجرای پل وب و باز کردن پنجره کروم
         if not port_open(BRIDGE_PORT):
             bridge_proc = start_bridge()
-            time.sleep(1.5)
-
-        # ۲. اجرای سرور اصلی Node
-        if not port_open(PORT):
-            say("🚀 در حال راه‌اندازی سرور اصلی برنامه...")
-            server_proc = start_server(node)
-
-            for _ in range(60):
-                if server_proc.poll() is not None:
-                    say("⚠️ تلاش مجدد برای اجرای سرور...")
-                    install_node_deps(npm)
-                    server_proc = start_server(node)
-                    for _ in range(60):
-                        if server_proc.poll() is not None:
-                            fail("سرور اصلی بالا نیامد.")
-                        if port_open(PORT):
-                            break
-                        time.sleep(0.5)
+            say("⏳ در حال صبر برای باز شدن پنجره کروم و آماده‌سازی چت DeepSeek...")
+            for _ in range(30):
+                if port_open(BRIDGE_PORT):
+                    say("✅ پنجره Google Chrome باز شد و پل وب DeepSeek فعال گردید!")
                     break
+                time.sleep(1)
+
+        # ۲. اجرای سرور اصلی برنامه
+        if not port_open(PORT):
+            say("🚀 در حال راه‌اندازی سرور اصلی داشبورد...")
+            server_proc = start_server(node)
+            for _ in range(40):
                 if port_open(PORT):
                     break
                 time.sleep(0.5)
-            else:
-                fail("سرور در زمان مقرر پاسخ نداد.")
-        else:
-            say(f"ℹ️ سرور اصلی از قبل روی پورت {PORT} فعال است.")
 
-        say("\n" + "═" * 68)
+        say("\n" + "═" * 70)
         say(f"  🎉 تمام سرویس‌ها با موفقیت بالا آمدند!")
-        say(f"  🌐 آدرس وب: http://localhost:{PORT}")
-        say(f"  🌉 پل مرورگر DeepSeek: http://localhost:{BRIDGE_PORT}/v1 (پورت فعال: {port_open(BRIDGE_PORT)})")
-        say(f"  ⚡ مدل‌های آماده: Google Gemini 1.5 Flash + پل سلنیومی کروم + موتور آفلاین")
-        say(f"  برای خروج و خاموش کردن همه سرویس‌ها: در این پنجره Ctrl+C بزنید.")
-        say("═" * 68 + "\n")
+        say(f"  🌐 داشبورد عیب‌یابی: http://localhost:{PORT}")
+        say(f"  🤖 هوش مصنوعی فعال: Google Chrome (DeepSeek Web Driver) روی پورت {BRIDGE_PORT}")
+        say(f"  🧠 پایگاه دانش یادگیری: متصل و فعال")
+        say(f"  برای خروج و خاموش کردن: در این پنجره Ctrl+C بزنید.")
+        say("═" * 70 + "\n")
 
-        # ۳. باز کردن حتمی در Google Chrome
+        # ۳. باز کردن داشبورد در کروم
         open_in_chrome(URL)
 
-        # مانیتور پردازش‌ها
         while True:
             if server_proc and server_proc.poll() is not None:
-                say("⚠️ سرور اصلی متوقف شد.")
                 break
             time.sleep(1)
 
     except KeyboardInterrupt:
-        say("\n⏹ در حال متوقف کردن تمام پردازش‌ها...")
+        say("\n⏹ در حال خاموش کردن پردازش‌ها...")
     finally:
         if server_proc:
-            try:
-                server_proc.terminate()
-                server_proc.wait(timeout=3)
-            except Exception:
-                try: server_proc.kill()
-                except Exception: pass
+            try: server_proc.terminate()
+            except Exception: pass
         if bridge_proc:
-            try:
-                bridge_proc.terminate()
-                bridge_proc.wait(timeout=3)
-            except Exception:
-                try: bridge_proc.kill()
-                except Exception: pass
-        say("همه سرویس‌ها خاموش شدند. موفق باشید 👋")
+            try: bridge_proc.terminate()
+            except Exception: pass
+        say("خداحافظ 👋")
 
 
 if __name__ == "__main__":
