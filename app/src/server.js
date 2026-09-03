@@ -554,6 +554,17 @@ app.post('/api/bom/upload', (req, res) => {
   }
 });
 
+// Proxy Bridge Login Status
+app.get('/api/bridge/status', async (req, res) => {
+  try {
+    const r = await fetch(`${BRIDGE_URL}/login-status`);
+    const data = await r.json();
+    res.json(data);
+  } catch (e) {
+    res.json({ ok: false, error: 'پل وب در دسترس نیست یا در حال راه‌اندازی است.' });
+  }
+});
+
 // DTC API
 app.get('/api/dtc/list', (req, res) => {
   res.json(DTC_DATABASE);

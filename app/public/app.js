@@ -187,11 +187,27 @@ function refreshKeyStatus() {
   }
 }
 
-fetch('/api/health').then(r => r.json()).then(d => {
-  serverHasKey = Boolean(d.hasGeminiKey || d.hasDeepseekKey);
-  refreshKeyStatus();
-  if (d.dbStats) updateDbStats(d.dbStats);
-}).catch(() => {});
+async function checkLoginStatus() {
+  try {
+    const res = await fetch('/api/bridge/status');
+    const data = await res.json();
+    const ls = data.login_status || {};
+    const bridgeNotice = document.getElementById('bridgeNotice');
+    if (bridgeNotice && data.ok) {
+      if (ls.logged_in) {
+        bridgeNotice.innerHTML = `<span>🟢 <b>لاگین DeepSeek تایید شد:</b> حساب کاربری <b>${esc(ls.email)}</b> احراز هویت شده و آماده است.</span>
+          <button id="testBridgeBtn" onclick="testBridgeCall()" style="font-size:12px;padding:5px 10px;background:var(--accent-2);color:#04121d;font-weight:700">⚡ تست ارسال پیام</button>`;
+      } else {
+        bridgeNotice.innerHTML = `<span>🟡 <b>در انتظار تایید لاگین:</b> فرم ورود با ایمیل <b>${esc(ls.email)}</b> ارسال شده است. اگر پازل/کپچای امنیتی در پنجره کروم باز است، آن را کامل کنید.</span>
+          <button onclick="checkLoginStatus()" style="font-size:12px;padding:5px 10px;background:var(--warn);color:#04121d;font-weight:700">🔄 بررسی مجدد لاگین</button>`;
+      }
+    }
+  } catch (e) {
+    // Bridge might be offline
+  }
+}
+setInterval(checkLoginStatus, 5000);
+checkLoginStatus();
 
 const providerRadios = () => [...document.querySelectorAll('input[name="provider"]')];
 const bridgeFields = document.getElementById('bridgeFields');
@@ -255,20 +271,22 @@ els.clearKeyBtn.onclick = () => {
   refreshKeyStatus();
 };
 
+window.testBridgeCall = async function() {
+  setLoading(true, 'در حال ارسال پرامپت تستی به پنجره باز Google Chrome برای DeepSeek...');
+  try {
+    const res = await api('/api/session/start', { symptom: 'تست اولیه ارتباط با DeepSeek در پنجره کروم', use_bom: false, max_questions: 1 });
+    alert('🎉 ارتباط با DeepSeek در پنجره کروم برقرار است!\nاولین سوال توسط مدل مطرح شد: ' + (res.question || 'پاسخ دریافت شد.'));
+    location.reload();
+  } catch (e) {
+    showError('خطا در ارتباط با پنجره کروم: ' + e.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
 // Test DeepSeek Bridge Live Button
 if (els.testBridgeBtn) {
-  els.testBridgeBtn.onclick = async () => {
-    setLoading(true, 'در حال ارسال پرامپت تستی به پنجره باز Google Chrome برای DeepSeek...');
-    try {
-      const res = await api('/api/session/start', { symptom: 'تست اولیه ارتباط با DeepSeek در پنجره کروم', use_bom: false, max_questions: 1 });
-      alert('🎉 ارتباط با DeepSeek در پنجره کروم برقرار است!\nاولین سوال توسط مدل مطرح شد: ' + (res.question || 'پاسخ دریافت شد.'));
-      location.reload();
-    } catch (e) {
-      showError('خطا در ارتباط با پنجره کروم: ' + e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  els.testBridgeBtn.onclick = window.testBridgeCall;
 }
 
 els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) els.settingsModal.classList.remove('show'); };
