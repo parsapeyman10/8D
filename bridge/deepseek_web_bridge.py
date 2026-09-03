@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-پل وب DeepSeek — حالت پنجره نمایان (Visible GUI) + ورود خودکار
-===============================================================
-این سرویس پنجره مرورگر کروم را باز می‌کند (کاملاً قابل مشاهده)،
-با اطلاعات کاربری وارد حساب می‌شود، سوالات را تایپ کرده و
-پاسخ دریافتی را به اپلیکیشن عیب‌یابی تحویل می‌دهد.
+پل وب DeepSeek — نسخه ضد کرش (Anti-Crash) با ورود خودکار
+============================================================
+این سرویس پنجره مرورگر کروم را باز می‌کند، قفل‌های قبلی را پاک می‌کند،
+وارد حساب کاربری می‌شود و پاسخ‌ها را به اپلیکیشن تحویل می‌دهد.
 
 آدرس برای اپ:  http://localhost:8765/v1
 در اپ: ⚙️ تنظیمات مدل → 🌐 مرورگر کروم (پل سلنیومی)
@@ -14,6 +13,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -36,12 +36,26 @@ ANSWER_TIMEOUT = int(os.environ.get("ANSWER_TIMEOUT", "300"))  # ثانیه
 DEEPSEEK_EMAIL = os.environ.get("DEEPSEEK_EMAIL", "Abraham.Hassanloo689@gmail.com")
 DEEPSEEK_PASSWORD = os.environ.get("DEEPSEEK_PASSWORD", "hsshhsj79")
 
-# حالت نمایش پنجره (پیش‌فرض: 0 یعنی پنجره باز و نمایان باشد)
+# حالت نمایش پنجره (پیش‌فرض: 0 یعنی پنجره نمایان باشد)
 HEADLESS_MODE = os.environ.get("HEADLESS", "0").strip().lower() in ("1", "true", "yes")
 
 app = Flask(__name__)
 _lock = threading.Lock()   # هم‌زمان فقط یک سوال
 _driver = None
+
+
+def cleanup_stale_locks(profile_path):
+    """پاکسازی فایل‌های قفل مانده از کروم قبلی برای جلوگیری از خطای DevToolsActivePort"""
+    if not os.path.isdir(profile_path):
+        return
+    lock_names = ["SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile", "DevToolsActivePort"]
+    for root, _, files in os.walk(profile_path):
+        for f in files:
+            if f in lock_names:
+                try:
+                    os.remove(os.path.join(root, f))
+                except Exception:
+                    pass
 
 
 def find_local_driver():
@@ -76,24 +90,36 @@ def find_local_driver():
     return (None, None)
 
 
-def _setup_options(is_chrome=True):
-    """تنظیمات مرورگر"""
+def _setup_options(is_chrome=True, profile_path=PROFILE_DIR):
+    """تنظیمات ضد کرش مرورگر برای ویندوز"""
+    cleanup_stale_locks(profile_path)
+
     if is_chrome:
         opts = webdriver.ChromeOptions()
     else:
         opts = webdriver.EdgeOptions()
 
-    opts.add_argument(f"--user-data-dir={PROFILE_DIR if is_chrome else PROFILE_DIR + '_edge'}")
+    # پوشه اختصاصی پروفایل
+    if profile_path:
+        opts.add_argument(f"--user-data-dir={profile_path}")
+
+    # فلگ‌های حیاتی برای جلوگیری از خطای DevToolsActivePort و کرش در ویندوز
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-software-rasterizer")
+    opts.add_argument("--remote-debugging-port=0")
+    opts.add_argument("--no-first-run")
+    opts.add_argument("--no-default-browser-check")
+    opts.add_argument("--ignore-certificate-errors")
+    opts.add_argument("--disable-features=IsolateOrigins,site-per-process")
     opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+    opts.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     opts.add_experimental_option("useAutomationExtension", False)
 
     if HEADLESS_MODE:
         opts.add_argument("--headless=new")
         opts.add_argument("--window-size=1920,1080")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--mute-audio")
     else:
         opts.add_argument("--start-maximized")
@@ -105,18 +131,18 @@ def _setup_options(is_chrome=True):
 def _auto_login(d):
     """ورود خودکار به DeepSeek با ایمیل و پسورد"""
     try:
-        print("🔍 در حال بررسی وضعیت ورود (لاگین)...")
+        print("🔍 در حال بررسی وضعیت لاگین...")
         time.sleep(2)
         # ۱. بررسی اینکه آیا از قبل لاگین هستیم
         for sel in ("textarea#chat-input", "textarea", "div[contenteditable='true']"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
             for el in els:
                 if el.is_displayed():
-                    print("✅ حساب از قبل وارد شده و نشست فعال است!")
+                    print("✅ حساب از قبل وارد شده و آماده است!")
                     return True
 
-        # ۲. بررسی وجود فرم لاگین
-        print(f"🔐 شروع فرآیند ورود با ایمیل: {DEEPSEEK_EMAIL}")
+        # ۲. فرم لاگین
+        print(f"🔐 شروع ورود خودکار با ایمیل: {DEEPSEEK_EMAIL}")
 
         # تب رمز عبور یا ورود با ایمیل
         tab_selectors = [
@@ -175,7 +201,7 @@ def _auto_login(d):
             except Exception:
                 pass
 
-        # ۶. کلیک روی دکمه ورود (Sign In / Log In)
+        # ۶. کلیک روی دکمه ورود
         btn_selectors = [
             "button[type='submit']",
             ".ds-button--primary",
@@ -200,7 +226,7 @@ def _auto_login(d):
             except Exception:
                 pass
 
-        # ۷. صبر برای ورود و لود شدن صفحه اصلی چت
+        # ۷. صبر برای لود شدن چت
         print("⏳ منتظر تایید و ورود به صفحه اصلی چت...")
         deadline = time.time() + 25
         while time.time() < deadline:
@@ -218,6 +244,23 @@ def _auto_login(d):
     return False
 
 
+def _create_driver_instance(driver_type, driver_path, profile_path):
+    """ایجاد نمونه درایور با تنظیمات مشخص"""
+    if driver_type == "chrome":
+        opts = _setup_options(is_chrome=True, profile_path=profile_path)
+        if driver_path:
+            service = ChromeService(executable_path=driver_path)
+            return webdriver.Chrome(service=service, options=opts)
+        return webdriver.Chrome(options=opts)
+    else:
+        from selenium.webdriver.edge.service import Service as EdgeService
+        opts = _setup_options(is_chrome=False, profile_path=profile_path)
+        if driver_path:
+            service = EdgeService(executable_path=driver_path)
+            return webdriver.Edge(service=service, options=opts)
+        return webdriver.Edge(options=opts)
+
+
 # ---------------------------------------------------------------- مرورگر
 def get_driver():
     global _driver
@@ -229,53 +272,65 @@ def get_driver():
             _driver = None
 
     driver_type, driver_path = find_local_driver()
+    driver_type = driver_type or "chrome"
     mode_text = "مخفی (Headless)" if HEADLESS_MODE else "نمایان (Visible Window)"
-    print(f"🚀 در حال باز کردن پنجره مرورگر ({mode_text})...")
-
-    # ۱. اگر درایور محلی پیدا شد
+    print(f"🚀 در حال راه‌اندازی مرورگر ({mode_text})...")
     if driver_path:
-        print(f"🔧 استفاده از درایور محلی: {driver_path}")
-        try:
-            if driver_type == "chrome":
-                opts = _setup_options(is_chrome=True)
-                service = ChromeService(executable_path=driver_path)
-                _driver = webdriver.Chrome(service=service, options=opts)
-            else:
-                from selenium.webdriver.edge.service import Service as EdgeService
-                opts = _setup_options(is_chrome=False)
-                service = EdgeService(executable_path=driver_path)
-                _driver = webdriver.Edge(service=service, options=opts)
+        print(f"🔧 درایور: {driver_path}")
 
-            _driver.get(CHAT_URL)
-            _auto_login(_driver)
-            print("🌐 مرورگر آماده به کار است. پنجره را نبندید.")
-            return _driver
-        except Exception as e:
-            print(f"⚠️ خطا در باز کردن مرورگر: {e}")
-
-    # ۲. تلاش عادی خودکار
+    # تلاش ۱: با پوشه پروفایل استاندارد
     try:
-        opts = _setup_options(is_chrome=True)
-        _driver = webdriver.Chrome(options=opts)
+        _driver = _create_driver_instance(driver_type, driver_path, PROFILE_DIR)
         _driver.get(CHAT_URL)
         _auto_login(_driver)
         print("🌐 مرورگر آماده به کار است. پنجره را نبندید.")
         return _driver
-    except Exception as chrome_err:
-        # ۳. تلاش با Edge در ویندوز
-        if os.name == "nt":
-            try:
-                print("⚠️ تلاش با Microsoft Edge...")
-                opts = _setup_options(is_chrome=False)
-                _driver = webdriver.Edge(options=opts)
-                _driver.get(CHAT_URL)
-                _auto_login(_driver)
-                print("🌐 مرورگر Edge آماده به کار است.")
-                return _driver
-            except Exception:
-                pass
+    except Exception as e1:
+        print(f"⚠️ تلاش اول با پروفایل پیش‌فرض با خطا مواجه شد ({e1}). تلاش مجدد با پروفایل ایزوله...")
 
-        raise chrome_err
+    # تلاش ۲: با پوشه پروفایل موقت و ایزوله (در صورت قفل بودن کروم در ویندوز)
+    try:
+        temp_profile = os.path.join(tempfile.gettempdir(), f"deepseek_profile_{uuid.uuid4().hex[:6]}")
+        _driver = _create_driver_instance(driver_type, driver_path, temp_profile)
+        _driver.get(CHAT_URL)
+        _auto_login(_driver)
+        print("🌐 مرورگر با پروفایل ایزوله آماده به کار است.")
+        return _driver
+    except Exception as e2:
+        print(f"⚠️ تلاش دوم با خطا مواجه شد: {e2}")
+
+    # تلاش ۳: با مرورگر Edge در ویندوز
+    if os.name == "nt" and driver_type != "edge":
+        try:
+            print("⚠️ تلاش جایگزین با Microsoft Edge...")
+            temp_profile_edge = os.path.join(tempfile.gettempdir(), f"deepseek_edge_{uuid.uuid4().hex[:6]}")
+            _driver = _create_driver_instance("edge", None, temp_profile_edge)
+            _driver.get(CHAT_URL)
+            _auto_login(_driver)
+            print("🌐 مرورگر Edge آماده به کار است.")
+            return _driver
+        except Exception as e3:
+            print(f"⚠️ تلاش Edge نیز با خطا مواجه شد: {e3}")
+
+    # راهنمای جامع رفع مشکل
+    print("""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ❌ خطای Chrome failed to start / DevToolsActivePort                          ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  علت‌های احتمالی:                                                            ║
+║  ۱. یک پنجره مرورگر Google Chrome از قبل در سیستم شما باز است یا در           ║
+║     Task Manager ویندوز در حال اجراست و فایل‌های درایور را قفل کرده است.     ║
+║  ۲. نسخه فایل chromedriver.exe با نسخه گوگل کروم نصب‌شده شما یکسان نیست.     ║
+║                                                                              ║
+║  راه‌حل‌های فوری:                                                             ║
+║  🔹 تمام پنجره‌های کروم باز را ببندید (در صورت لزوم از Task Manager).         ║
+║  🔹 یا خیلی راحت‌تر: در برنامه (http://localhost:3000) از منوی ⚙️ تنظیمات مدل║
+║     یکی از ارائه‌دهنده‌های رایگان بدون نیاز به کروم (مثل Groq یا OpenRouter)  ║
+║     را انتخاب کنید تا بدون دردسرهای سلنیوم در ۱ ثانیه پاسخ بگیرید!          ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+""")
+    raise RuntimeError("عدم موفقیت در راه‌اندازی مرورگر. لطفا پنجره‌های دیگر کروم را ببندید.")
 
 
 def _find_input(d, timeout=60):
@@ -302,7 +357,7 @@ def _messages_text(d):
 def ask_deepseek(prompt: str) -> str:
     d = get_driver()
     print("📩 در حال ارسال پرامپت به سایت DeepSeek...")
-    d.get(CHAT_URL)  # هر سوال در یک چت تازه
+    d.get(CHAT_URL)
     box = _find_input(d)
     before = len(_messages_text(d))
 
@@ -396,7 +451,7 @@ if __name__ == "__main__":
     try:
         get_driver()
     except Exception as e:
-        print(f"\n⚠️ خطا در راه‌اندازی مرورگر: {e}")
+        print(f"\n⚠️ {e}")
         if os.name == "nt":
             input("\nبرای خروج Enter بزنید...")
         sys.exit(1)
