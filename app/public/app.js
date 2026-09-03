@@ -132,37 +132,63 @@ function getConfig() {
   try {
     const c = JSON.parse(localStorage.getItem('llm_config') || '{}');
     return {
-      provider: c.provider || 'cloud',
-      apiKey: c.apiKey || localStorage.getItem('deepseek_api_key') || '',
+      provider: c.provider || 'offline',
+      apiKey: c.apiKey || '',
       baseUrl: c.baseUrl || '',
-      bridgeUrl: c.bridgeUrl || '',
+      bridgeUrl: c.bridgeUrl || 'http://localhost:8765/v1',
       chatModel: c.chatModel || '',
       reasonerModel: c.reasonerModel || '',
-      cloudPreset: c.cloudPreset || 'deepseek',
+      cloudPreset: c.cloudPreset || 'avalai',
       cloudBaseUrl: c.cloudBaseUrl || '',
       cloudChatModel: c.cloudChatModel || '',
       cloudReasonerModel: c.cloudReasonerModel || '',
     };
-  } catch { return { provider: 'cloud', apiKey: '', baseUrl: '', bridgeUrl: '', chatModel: '', reasonerModel: '', cloudPreset: 'deepseek', cloudBaseUrl: '', cloudChatModel: '', cloudReasonerModel: '' }; }
+  } catch {
+    return {
+      provider: 'offline',
+      apiKey: '',
+      baseUrl: '',
+      bridgeUrl: 'http://localhost:8765/v1',
+      chatModel: '',
+      reasonerModel: '',
+      cloudPreset: 'avalai',
+      cloudBaseUrl: '',
+      cloudChatModel: '',
+      cloudReasonerModel: '',
+    };
+  }
 }
 function saveConfig(c) { localStorage.setItem('llm_config', JSON.stringify(c)); }
 
 function configReady() {
   const c = getConfig();
-  if (c.provider === 'demo') return true;
-  if (c.provider === 'local' || c.provider === 'bridge') return true;
+  if (c.provider === 'offline' || c.provider === 'local' || c.provider === 'bridge' || c.provider === 'demo') {
+    return true;
+  }
   return Boolean(c.apiKey) || serverHasKey;
 }
 
 function refreshKeyStatus() {
   const c = getConfig();
   const ok = configReady();
-  const presetNames = { deepseek: 'DeepSeek', openrouter: 'OpenRouter', groq: 'Groq', gemini: 'Gemini', openai: 'OpenAI', xai: 'xAI', mistral: 'Mistral', together: 'Together', avalai: 'AvalAI', gapgpt: 'GapGPT', custom: 'سفارشی' };
+  const presetNames = {
+    offline: 'موتور آفلاین',
+    avalai: 'AvalAI (ایرانی)',
+    gapgpt: 'GapGPT (ایرانی)',
+    deepseek: 'DeepSeek',
+    openrouter: 'OpenRouter',
+    groq: 'Groq',
+    gemini: 'Gemini',
+    openai: 'OpenAI',
+    xai: 'xAI',
+    custom: 'سفارشی',
+  };
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
-    c.provider === 'demo' ? 'حالت دمو'
-    : c.provider === 'bridge' ? 'پل سلنیومی'
-    : c.provider === 'local' ? 'مدل لوکال'
+    c.provider === 'offline' ? 'موتور آفلاین ⚡'
+    : c.provider === 'bridge' ? 'پل کروم 🌐'
+    : c.provider === 'local' ? 'مدل محلی 🦙'
+    : c.provider === 'demo' ? 'حالت دمو'
     : ok ? (presetNames[c.cloudPreset] || 'ابری')
     : 'تنظیم نشده';
 }
@@ -174,9 +200,9 @@ fetch('/api/health').then(r => r.json()).then(d => {
 }).catch(() => {});
 
 const providerRadios = () => [...document.querySelectorAll('input[name="provider"]')];
+const offlineFields = document.getElementById('offlineFields');
 const cloudFields = document.getElementById('cloudFields');
 const localFields = document.getElementById('localFields');
-const demoFields = document.getElementById('demoFields');
 const bridgeFields = document.getElementById('bridgeFields');
 const baseUrlInput = document.getElementById('baseUrlInput');
 const bridgeUrlInput = document.getElementById('bridgeUrlInput');
@@ -189,16 +215,14 @@ const cloudChatModelInput = document.getElementById('cloudChatModelInput');
 const cloudReasonerModelInput = document.getElementById('cloudReasonerModelInput');
 
 const PRESETS = {
-  deepseek:   { base: 'https://api.deepseek.com',                                chat: 'deepseek-chat', reasoner: 'deepseek-reasoner', keyUrl: 'https://platform.deepseek.com', hint: 'سرویس رسمی DeepSeek. ارزان و قوی.' },
-  openrouter: { base: 'https://openrouter.ai/api/v1',                            chat: 'deepseek/deepseek-chat-v3.1:free', reasoner: '', keyUrl: 'https://openrouter.ai/keys', hint: 'مدل‌های :free کاملاً رایگان هستند.' },
-  groq:       { base: 'https://api.groq.com/openai/v1',                          chat: 'llama-3.3-70b-versatile', reasoner: '', keyUrl: 'https://console.groq.com/keys', hint: 'فوق‌العاده سریع و رایگان.' },
-  gemini:     { base: 'https://generativelanguage.googleapis.com/v1beta/openai', chat: 'gemini-2.0-flash', reasoner: '', keyUrl: 'https://aistudio.google.com/apikey', hint: 'کلید رایگان از Google AI Studio.' },
+  avalai:     { base: 'https://api.avalai.ir/v1',                                chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://avalai.ir', hint: 'درگاه ایرانی بدون تحریم و بدون نیاز به VPN.' },
+  gapgpt:     { base: 'https://api.gapgpt.app/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://gapgpt.app', hint: 'درگاه ایرانی با پرداخت ریالی.' },
+  deepseek:   { base: 'https://api.deepseek.com',                                chat: 'deepseek-chat', reasoner: 'deepseek-reasoner', keyUrl: 'https://platform.deepseek.com', hint: 'سرویس رسمی DeepSeek.' },
+  openrouter: { base: 'https://openrouter.ai/api/v1',                            chat: 'deepseek/deepseek-chat-v3.1:free', reasoner: '', keyUrl: 'https://openrouter.ai/keys', hint: 'دارای مدل‌های رایگان :free.' },
+  groq:       { base: 'https://api.groq.com/openai/v1',                          chat: 'llama-3.3-70b-versatile', reasoner: '', keyUrl: 'https://console.groq.com/keys', hint: 'فوق‌العاده سریع با پلن رایگان.' },
+  gemini:     { base: 'https://generativelanguage.googleapis.com/v1beta/openai', chat: 'gemini-2.0-flash', reasoner: '', keyUrl: 'https://aistudio.google.com/apikey', hint: 'Google AI Studio.' },
   openai:     { base: 'https://api.openai.com/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://platform.openai.com/api-keys', hint: 'سرویس رسمی OpenAI.' },
   xai:        { base: 'https://api.x.ai/v1',                                     chat: 'grok-3-mini', reasoner: '', keyUrl: 'https://console.x.ai', hint: 'Grok از xAI.' },
-  mistral:    { base: 'https://api.mistral.ai/v1',                               chat: 'mistral-large-latest', reasoner: '', keyUrl: 'https://console.mistral.ai/api-keys', hint: 'پلن رایگان دارد.' },
-  together:   { base: 'https://api.together.xyz/v1',                             chat: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', reasoner: '', keyUrl: 'https://api.together.ai/settings/api-keys', hint: 'مدل‌های متن‌باز متنوع.' },
-  avalai:     { base: 'https://api.avalai.ir/v1',                                chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://avalai.ir', hint: 'درگاه ایرانی بدون تحریم.' },
-  gapgpt:     { base: 'https://api.gapgpt.app/v1',                               chat: 'gpt-4o-mini', reasoner: '', keyUrl: 'https://gapgpt.app', hint: 'درگاه ایرانی — پرداخت ریالی.' },
   custom:     { base: '', chat: '', reasoner: '', keyUrl: '', hint: 'هر سرور سازگار با OpenAI.' },
 };
 
@@ -214,23 +238,23 @@ function applyPreset(id, keepValues = false) {
 cloudPreset.addEventListener('change', () => applyPreset(cloudPreset.value));
 
 function syncProviderFields() {
-  const p = providerRadios().find(r => r.checked)?.value || 'cloud';
+  const p = providerRadios().find(r => r.checked)?.value || 'offline';
+  if (offlineFields) offlineFields.style.display = p === 'offline' ? 'block' : 'none';
   cloudFields.style.display = p === 'cloud' ? 'block' : 'none';
   localFields.style.display = p === 'local' ? 'block' : 'none';
   bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
-  if (demoFields) demoFields.style.display = 'none';
 }
 providerRadios().forEach(r => r.addEventListener('change', syncProviderFields));
 
 els.settingsBtn.onclick = () => {
   const c = getConfig();
-  providerRadios().forEach(r => r.checked = (r.value === c.provider) || (c.provider === 'demo' && r.value === 'cloud'));
+  providerRadios().forEach(r => r.checked = (r.value === c.provider));
   els.apiKeyInput.value = c.apiKey;
-  baseUrlInput.value = c.baseUrl;
-  if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || '';
-  chatModelInput.value = c.chatModel;
-  reasonerModelInput.value = c.reasonerModel;
-  cloudPreset.value = c.cloudPreset || 'deepseek';
+  baseUrlInput.value = c.baseUrl || 'http://localhost:11434/v1';
+  if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || 'http://localhost:8765/v1';
+  chatModelInput.value = c.chatModel || 'deepseek-r1:8b';
+  reasonerModelInput.value = c.reasonerModel || '';
+  cloudPreset.value = c.cloudPreset || 'avalai';
   applyPreset(cloudPreset.value, true);
   cloudBaseUrlInput.value = c.cloudBaseUrl || PRESETS[cloudPreset.value]?.base || '';
   cloudChatModelInput.value = c.cloudChatModel || PRESETS[cloudPreset.value]?.chat || '';
@@ -240,13 +264,13 @@ els.settingsBtn.onclick = () => {
 };
 els.closeModalBtn.onclick = () => els.settingsModal.classList.remove('show');
 els.saveKeyBtn.onclick = () => {
-  const provider = providerRadios().find(r => r.checked)?.value || 'cloud';
+  const provider = providerRadios().find(r => r.checked)?.value || 'offline';
   const apiKey = els.apiKeyInput.value.trim();
   saveConfig({
-    provider: provider === 'cloud' && /^demo$/i.test(apiKey) ? 'demo' : provider,
+    provider,
     apiKey,
     baseUrl: baseUrlInput.value.trim(),
-    bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : '',
+    bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : 'http://localhost:8765/v1',
     chatModel: chatModelInput.value.trim(),
     reasonerModel: reasonerModelInput.value.trim(),
     cloudPreset: cloudPreset.value,
@@ -258,9 +282,10 @@ els.saveKeyBtn.onclick = () => {
   refreshKeyStatus();
 };
 els.clearKeyBtn.onclick = () => {
-  localStorage.removeItem('llm_config');
-  localStorage.removeItem('deepseek_api_key');
+  saveConfig({ provider: 'offline' });
   els.apiKeyInput.value = ''; baseUrlInput.value = ''; chatModelInput.value = ''; reasonerModelInput.value = '';
+  providerRadios().forEach(r => r.checked = (r.value === 'offline'));
+  syncProviderFields();
   refreshKeyStatus();
 };
 els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) els.settingsModal.classList.remove('show'); };
@@ -274,18 +299,20 @@ function hideError() { els.errorBanner.classList.remove('show'); }
 
 function errorMessage(err, status) {
   if (status === 401 && err?.error === 'missing_api_key')
-    return 'کلید API تنظیم نشده است. از دکمه «⚙️ تنظیمات» بالای صفحه یک سرویس را انتخاب کنید.';
+    return 'کلید API تنظیم نشده است. می‌توانید در تنظیمات گزینه «موتور هوش مصنوعی آفلاین» را انتخاب نمایید.';
   if (status === 401) return 'کلید API نامعتبر است.';
   if (status === 402) return 'اعتبار حساب مدل کافی نیست.';
-  if (status === 502) return 'اتصال به مدل برقرار نشد.';
+  if (status === 502) return 'اتصال به مدل ابری برقرار نشد (به دلیل عدم دسترسی به اینترنت/VPN). پیشنهاد: از منوی تنظیمات حالت «موتور آفلاین» را فعال کنید.';
   return 'خطا در ارتباط با سرور: ' + (err?.detail || err?.error || status || 'نامشخص');
 }
 
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   const c = getConfig();
-  if (c.provider === 'bridge') {
-    headers['x-provider'] = 'local';
+  if (c.provider === 'offline') {
+    headers['x-provider'] = 'offline';
+  } else if (c.provider === 'bridge') {
+    headers['x-provider'] = 'bridge';
     headers['x-base-url'] = c.bridgeUrl || 'http://localhost:8765/v1';
     if (c.chatModel) headers['x-chat-model'] = c.chatModel;
     if (c.reasonerModel) headers['x-reasoner-model'] = c.reasonerModel;
@@ -296,8 +323,7 @@ async function api(path, body) {
     if (c.reasonerModel) headers['x-reasoner-model'] = c.reasonerModel;
   } else {
     headers['x-provider'] = 'cloud';
-    if (c.provider === 'demo') headers['x-deepseek-key'] = 'demo';
-    else if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
+    if (c.apiKey) headers['x-deepseek-key'] = c.apiKey;
     if (c.cloudBaseUrl) headers['x-base-url'] = c.cloudBaseUrl;
     if (c.cloudChatModel) headers['x-chat-model'] = c.cloudChatModel;
     const reasoner = c.cloudReasonerModel || c.cloudChatModel;
@@ -522,14 +548,9 @@ async function startSession() {
   const symptom = els.symptomInput.value.trim();
   const dtc = els.dtcInput ? els.dtcInput.value.trim() : '';
   if (!symptom && !dtc) { showError('لطفاً ابتدا علامت یا کد خطای دیاگ (DTC) را وارد کنید.'); return; }
-  if (!configReady()) {
-    showError('لطفاً ابتدا از دکمه «⚙️ تنظیمات» یک مدل را انتخاب کنید.');
-    els.settingsModal.classList.add('show');
-    return;
-  }
   hideError();
   els.startBtn.disabled = true;
-  setLoading(true, 'در حال جستجو در دیتابیس یادگیری و آماده‌سازی اولین سوال...');
+  setLoading(true, 'در حال جستجو در دیتابیس یادگیری و فرمول‌بندی سوالات تخصصی...');
   try {
     const use_bom = Boolean(els.useBomCheckbox.checked);
     const data = await api('/api/session/start', { symptom, dtc, use_bom, max_questions: 8 });
@@ -576,7 +597,7 @@ async function extendQuestions() {
 async function concludeEarly() {
   if (!sessionId) return;
   hideError();
-  setLoading(true, 'در حال استنتاج نهایی و تحلیل تمام شواهد با مدل هوش مصنوعی...');
+  setLoading(true, 'در حال استنتاج نهایی، تولید زنجیره ۵ چرا و گزارش کامل 8D...');
   try {
     const data = await api('/api/session/conclude', { sessionId });
     handleResponse(data);
@@ -702,7 +723,7 @@ async function analyzePart() {
     if (a && !a.unavailable && a.summary) {
       html += `<h3 style="color:var(--accent);font-size:14px;margin:14px 0 6px">🤖 تحلیل جامع هوش مصنوعی</h3><p style="font-size:13.5px;line-height:2">${esc(a.summary)}</p>`;
       if (a.failure_modes?.length) {
-        html += '<div>' + a.failure_modes.map(f => `<div class="rc"><div class="head"><div class="cause" style="font-size:13.5px">${esc(f.mode)}</div>${likBadge(f.likelihood)}</div><div class="evidence">${esc(f.why || '')}</div></div>`).join('') + '</div>';
+        html += '<div>' + a.failure_modes.map(f => `<div class="rc"><div class="head"><div class="cause" style="font-size:13.5px">${esc(f.mode || f)}</div>${f.likelihood ? likBadge(f.likelihood) : ''}</div>${f.why ? `<div class="evidence">${esc(f.why)}</div>` : ''}</div>`).join('') + '</div>';
       }
       if (a.inspection_steps?.length) html += `<h3 style="color:var(--accent);font-size:14px;margin:10px 0 4px">مراحل تست و اندازه‌گیری</h3><ol style="padding-right:18px;line-height:2;font-size:13px">${a.inspection_steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
     }

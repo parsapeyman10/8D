@@ -197,12 +197,12 @@
   .modal-backdrop.show { display: flex; }
   .modal {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 24px; width: min(520px, 92vw); max-height: 90vh; overflow-y: auto;
+    border-radius: var(--radius); padding: 24px; width: min(550px, 92vw); max-height: 90vh; overflow-y: auto;
   }
   .modal h2 { margin: 0 0 8px; font-size: 17px; }
   .modal-actions { display:flex; gap:10px; margin-top: 16px; justify-content: flex-start; }
   .provider-tabs { display:flex; flex-direction:column; gap:8px; margin: 10px 0 16px; }
-  .provider-tabs label { font-size: 14px; display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px 12px; border:1px solid var(--border); border-radius:10px; }
+  .provider-tabs label { font-size: 13.5px; display:flex; align-items:center; gap:8px; cursor:pointer; padding:9px 12px; border:1px solid var(--border); border-radius:10px; }
   .provider-tabs label:has(input:checked) { border-color: var(--accent-2); background: rgba(14,165,233,.08); }
   .fld { display:block; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
   .fld input, .fld textarea, .fld select { margin-top: 5px; font-size: 13.5px; }
@@ -229,7 +229,7 @@
   <div style="display:flex;align-items:center;gap:10px">
     <button id="uploadBomBtn" style="font-size:12px;padding:6px 10px" title="آپلود فایل اکسل BOM جدید">📁 آپلود BOM</button>
     <input type="file" id="bomFileInput" accept=".xlsx,.xls,.csv" style="display:none" />
-    <span class="key-status"><span id="keyDot" class="dot"></span><span id="keyText">کلید API</span></span>
+    <span class="key-status"><span id="keyDot" class="dot ok"></span><span id="keyText">موتور آفلاین</span></span>
     <button id="settingsBtn">⚙️ تنظیمات</button>
   </div>
 </header>
@@ -243,7 +243,7 @@
       <!-- Start card -->
       <div class="card" id="startCard">
         <h2>شروع عیب‌یابی هدایت‌شده</h2>
-        <p class="hint">علامت خرابی را بنویسید یا بگویید. دستیار با بررسی حافظه دیتابیس و پرسش‌های گزینه‌ای، زنجیره ۵ چرا و گزارش استاندارد 8D را تولید می‌کند.</p>
+        <p class="hint">علامت خرابی را بنویسید یا با دکمه میکروفون بگویید. سیستم بر اساس حافظه دیتابیس، استانداردهای خودرویی و سوالات چندگزینه‌ای، تحلیل ۵ چرا و گزارش 8D را استخراج می‌کند.</p>
         
         <div style="display:grid;grid-template-columns:1fr 180px;gap:10px;margin-bottom:10px">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -471,37 +471,43 @@
 <!-- Settings modal -->
 <div class="modal-backdrop" id="settingsModal">
   <div class="modal">
-    <h2>تنظیمات مدل</h2>
+    <h2>تنظیمات مدل هوش مصنوعی</h2>
     <div class="provider-tabs">
-      <label><input type="radio" name="provider" value="cloud" checked /> ☁️ API ابری DeepSeek</label>
-      <label><input type="radio" name="provider" value="bridge" /> 🌐 مرورگر کروم — بدون کلید (پل سلنیومی)</label>
-      <label><input type="radio" name="provider" value="local" /> 💻 مدل لوکال (Ollama و مشابه)</label>
+      <label><input type="radio" name="provider" value="offline" checked /> ⚡ <b>موتور هوش مصنوعی تخصصی آفلاین</b> (۱۰۰٪ بدون اینترنت و بدون VPN - آماده استفاده)</label>
+      <label><input type="radio" name="provider" value="bridge" /> 🌐 مرورگر کروم / پل وب (شناسایی خودکار پروکسی محلی)</label>
+      <label><input type="radio" name="provider" value="local" /> 🦙 مدل‌های محلی سیستم (Ollama / LM Studio)</label>
+      <label><input type="radio" name="provider" value="cloud" /> ☁️ سرویس‌های ابری با کلید API (DeepSeek / AvalAI / Groq / OpenAI)</label>
     </div>
 
-    <div id="cloudFields">
+    <div id="offlineFields">
+      <div style="background:rgba(52,211,153,.08);border:1px solid var(--good);border-radius:10px;padding:12px;font-size:13px;line-height:1.9">
+        <b style="color:var(--good)">✅ حالت مستقل و بدون نیاز به فیلترشکن:</b><br>
+        موتور تخصصی عیب‌یابی با تحلیل داده‌های BOM، کدهای خطای DTC، نقاط تست پین‌اوت و حافظه دیتابیس یادگیری، تمام فرآیند عیب‌یابی، زنجیره ۵ چرا و گزارش 8D را به صورت محلی و با سرعت آنی اجرا می‌کند.
+      </div>
+    </div>
+
+    <div id="cloudFields" style="display:none">
       <label class="fld">سرویس‌دهنده API
         <select id="cloudPreset">
+          <option value="avalai">AvalAI (درگاه ایرانی بدون تحریم)</option>
+          <option value="gapgpt">GapGPT (درگاه ایرانی - پرداخت ریالی)</option>
           <option value="deepseek">DeepSeek (رسمی)</option>
-          <option value="openrouter">OpenRouter — مدل‌های رایگان هم دارد</option>
-          <option value="groq">Groq — سریع و پلن رایگان</option>
+          <option value="openrouter">OpenRouter (دارای مدل‌های رایگان :free)</option>
+          <option value="groq">Groq (بسیار سریع و پلن رایگان)</option>
           <option value="gemini">Google Gemini</option>
           <option value="openai">OpenAI (ChatGPT)</option>
           <option value="xai">xAI (Grok)</option>
-          <option value="mistral">Mistral</option>
-          <option value="together">Together AI</option>
-          <option value="avalai">AvalAI (درگاه ایرانی)</option>
-          <option value="gapgpt">GapGPT (درگاه ایرانی)</option>
-          <option value="custom">سفارشی (هر سرویس سازگار با OpenAI)</option>
+          <option value="custom">سفارشی (Custom OpenAI URL)</option>
         </select>
       </label>
       <p class="hint" id="presetHint"></p>
       <input type="password" id="apiKeyInput" placeholder="کلید API..." autocomplete="off" />
       <label class="fld" style="margin-top:10px">آدرس سرور (Base URL)
-        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.deepseek.com" dir="ltr" />
+        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.avalai.ir/v1" dir="ltr" />
       </label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <label class="fld">مدل سوالات (Tier 1)
-          <input type="text" id="cloudChatModelInput" placeholder="deepseek-chat" dir="ltr" />
+          <input type="text" id="cloudChatModelInput" placeholder="gpt-4o-mini" dir="ltr" />
         </label>
         <label class="fld">مدل گزارش (Tier 2)
           <input type="text" id="cloudReasonerModelInput" placeholder="خالی = همان مدل" dir="ltr" />
@@ -510,28 +516,31 @@
     </div>
 
     <div id="bridgeFields" style="display:none">
-      <p class="hint">بدون کلید API: با اسکریپت پل، کروم باز می‌شود و از سایت chat.deepseek.com جواب می‌گیرد.</p>
+      <div style="background:rgba(56,189,248,.08);border:1px solid var(--accent);border-radius:10px;padding:12px;font-size:13px;line-height:1.9;margin-bottom:12px">
+        <b>🌐 اتصال از طریق پل مرورگر DeepSeek:</b><br>
+        پل مرورگر به صورت خودکار نرم‌افزارهای پروکسی فعال در سیستم (V2Ray / Clash / NekoRay) را شناسایی و روی کروم ست می‌کند تا بدون مشکل تحریم متصل شود.
+      </div>
       <label class="fld">آدرس پل
         <input type="text" id="bridgeUrlInput" placeholder="http://localhost:8765/v1" dir="ltr" />
       </label>
     </div>
 
     <div id="localFields" style="display:none">
-      <p class="hint">آدرس سرور لوکال (مثل Ollama یا LM Studio).</p>
-      <label class="fld">آدرس سرور
+      <p class="hint">اجرای مدل‌های هوش مصنوعی روی سیستم خودتان با استفاده از Ollama یا LM Studio.</p>
+      <label class="fld">آدرس سرور لوکال
         <input type="text" id="baseUrlInput" placeholder="http://localhost:11434/v1" dir="ltr" />
       </label>
-      <label class="fld">نام مدل
-        <input type="text" id="chatModelInput" placeholder="deepseek-r1:14b" dir="ltr" />
+      <label class="fld">نام مدل (مثلاً deepseek-r1:8b یا qwen2.5)
+        <input type="text" id="chatModelInput" placeholder="deepseek-r1:8b" dir="ltr" />
       </label>
       <label class="fld">نام مدل گزارش
-        <input type="text" id="reasonerModelInput" placeholder="deepseek-r1:14b" dir="ltr" />
+        <input type="text" id="reasonerModelInput" placeholder="deepseek-r1:8b" dir="ltr" />
       </label>
     </div>
 
     <div class="modal-actions">
-      <button class="primary" id="saveKeyBtn">ذخیره</button>
-      <button id="clearKeyBtn">حذف تنظیمات</button>
+      <button class="primary" id="saveKeyBtn">ذخیره تنظیمات</button>
+      <button id="clearKeyBtn">تنظیم مجدد به پیش‌فرض (آفلاین)</button>
       <button id="closeModalBtn">بستن</button>
     </div>
   </div>

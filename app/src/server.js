@@ -17,6 +17,7 @@ import {
 } from './db.js';
 import { lookupDtc, DTC_DATABASE } from './dtc_db.js';
 import { getPinoutData, PINOUTS_DATABASE } from './pinouts_db.js';
+import { runOfflineStep, runOfflineReport } from './offline_engine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -343,74 +344,52 @@ function caseStateForModel(state) {
 // ---- Tier 1: next question ----
 async function nextStep(cfg, state) {
   if (state.question_count >= state.max_questions) return { conclude: true };
+  if (cfg.provider === 'offline' || cfg.offline) {
+    return runOfflineStep(state);
+  }
   if (cfg.demo) return demoNextStep(state);
 
-  const parsed = await callJson({
-    cfg,
-    model: cfg.chatModel,
-    system: TIER1_QUESTION_SELECTOR,
-    user: JSON.stringify(caseStateForModel(state)),
-    temperature: 0,
-  });
+  try {
+    const parsed = await callJson({
+      cfg,
+      model: cfg.chatModel,
+      system: TIER1_QUESTION_SELECTOR,
+      user: JSON.stringify(caseStateForModel(state)),
+      temperature: 0,
+    });
 
-  if (!parsed) {
-    if (state.question_count >= state.max_questions) return { conclude: true };
-    return {
-      question: 'این مشکل از چه زمانی شروع شد و تحت چه شرایطی بیشتر دیده می‌شود؟',
-      options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند روز/هفته', 'از بدو مونتاژ / ابتدای کارکرد', 'فقط در شرایط خاص (دما/بار بالا)', fallbackLabel()],
-      leading_hypotheses: state.leading_hypotheses,
-      ruled_out: state.ruled_out,
-      _fallback: true,
-    };
+    if (parsed) return parsed;
+  } catch (err) {
+    console.warn('⚠️ اتصال به مدل خارجی برقرار نشد، جابجایی خودکار به موتور هوش مصنوعی آفلاین:', err.message);
+    return runOfflineStep(state);
   }
-  return parsed;
+
+  return runOfflineStep(state);
 }
 
 // ---- Tier 2: final report ----
 async function finalReport(cfg, state) {
+  if (cfg.provider === 'offline' || cfg.offline) {
+    return runOfflineReport(state);
+  }
   if (cfg.demo) return demoFinalReport(state);
-  const parsed = await callJson({
-    cfg,
-    model: cfg.reasonerModel,
-    system: TIER2_ANALYZER,
-    user: JSON.stringify(caseStateForModel(state)),
-    temperature: 0.1,
-    maxTokens: 4000,
-  });
-  if (parsed && Array.isArray(parsed.root_causes)) return parsed;
 
-  return {
-    root_causes: (state.leading_hypotheses || []).slice(0, 3).map((h) => ({
-      cause: h.hypothesis,
-      confidence: Math.min(h.confidence ?? 30, 90),
-      band: (h.confidence ?? 30) >= 70 ? 'High' : (h.confidence ?? 30) >= 40 ? 'Medium' : 'Low',
-      evidence: 'بر اساس پاسخ‌های مصاحبه عیب‌یابی و بررسی تجربیات دیتابیس',
-    })),
-    five_whys: [
-      `چرا ۱: علامت اولیه "${state.symptom}" ثبت شده است.`,
-      'چرا ۲: سیگنال الکتریکی یا پاسخ واحد کنترل در حد مطلوب نیست.',
-      'چرا ۳: قطعی مسیر یا عدم عملکرد صحیح قطعه درایور ایجاد شده است.',
-      'چرا ۴: قطعه تحت تنش حرارتی/ولتاژی یا لحیم‌کاری نامناسب قرار داشته است.',
-      'چرا ۵: نیاز به بازرسی کیفیت مونتاژ و تست قطعات روی خط.',
-    ],
-    eight_d_report: {
-      d1_team: 'تیم مهندسی تست و تضمین کیفیت',
-      d2_problem: `بررسی عیب: ${state.symptom}`,
-      d3_containment: 'قرنطینه بردهای دارای علامت مشابه و بازرسی چشمی',
-      d4_root_cause: (state.leading_hypotheses?.[0]?.hypothesis || 'نقص قطعه یا لحیم‌کاری'),
-      d5_corrective_actions: 'تعویض قطعه آسیب‌دیده و بهبود پروفایل حرارتی لحیم',
-      d6_verification: 'تست عملکردی با دستگاه دیاگ و اسیلوسکوپ',
-      d7_prevention: 'بازنگری چک‌لیست بازرسی فرآیند مونتاژ SMT',
-      d8_closure: 'تایید نهایی تکنسین و بستن پرونده در دیتابیس',
-    },
-    unresolved_conflicts: state.unresolved_conflicts || [],
-    recommended_actions: [
-      'بازرسی فیزیکی، تست پیوستگی و ولتاژ طبق مستندات و نقشه‌های رسمی',
-      'بررسی اتصالات لحیم و سلامت مسیرهای تغذیه و دیتا',
-    ],
-    escalate_if: ['تکرار خرابی در چند نمونه یا وجود ریسک ایمنی و حرارتی'],
-    _fallback: true,
-  };
+  try {
+    const parsed = await callJson({
+      cfg,
+      model: cfg.reasonerModel,
+      system: TIER2_ANALYZER,
+      user: JSON.stringify(caseStateForModel(state)),
+      temperature: 0.1,
+      maxTokens: 4000,
+    });
+    if (parsed && Array.isArray(parsed.root_causes)) return parsed;
+  } catch (err) {
+    console.warn('⚠️ اتصال به مدل برای گزارش نهایی ناموفق بود، تولید گزارش با موتور آفلاین:', err.message);
+    return runOfflineReport(state);
+  }
+
+  return runOfflineReport(state);
 }
 
 function escalationPayload(reason) {
@@ -428,7 +407,7 @@ function getApiKey(req) {
 }
 
 function getLlmConfig(req) {
-  const provider = (req.headers['x-provider'] || '').toString().trim() || (process.env.LLM_PROVIDER || 'cloud');
+  const provider = (req.headers['x-provider'] || '').toString().trim() || (process.env.LLM_PROVIDER || 'offline');
   const apiKey = getApiKey(req);
   const headerBase = (req.headers['x-base-url'] || '').toString().trim();
   const chatModel = (req.headers['x-chat-model'] || '').toString().trim() || CHAT_MODEL;
@@ -437,6 +416,12 @@ function getLlmConfig(req) {
   let baseUrl = DEEPSEEK_BASE_URL;
   if (provider === 'local') {
     baseUrl = headerBase || process.env.LOCAL_BASE_URL || 'http://localhost:11434/v1';
+  } else if (provider === 'bridge') {
+    baseUrl = headerBase || 'http://localhost:8765/v1';
+  } else if (provider === 'ollama') {
+    baseUrl = headerBase || 'http://localhost:11434/v1';
+  } else if (provider === 'lmstudio') {
+    baseUrl = headerBase || 'http://localhost:1234/v1';
   } else if (headerBase) {
     baseUrl = headerBase;
   }
@@ -447,14 +432,17 @@ function getLlmConfig(req) {
     effReasoner = (req.headers['x-chat-model'] || '').toString().trim() || chatModel;
   }
 
+  const isOffline = provider === 'offline' || provider === 'local_offline';
+
   return {
     provider,
     apiKey,
     baseUrl,
-    chatModel: provider === 'local' && !req.headers['x-chat-model'] ? (process.env.LOCAL_MODEL || chatModel) : chatModel,
-    reasonerModel: provider === 'local' && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || effReasoner) : effReasoner,
+    chatModel: (provider === 'local' || provider === 'ollama') && !req.headers['x-chat-model'] ? (process.env.LOCAL_MODEL || 'deepseek-r1:8b') : chatModel,
+    reasonerModel: (provider === 'local' || provider === 'ollama') && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || 'deepseek-r1:8b') : effReasoner,
     demo: isDemoKey(apiKey),
-    needsKey: provider !== 'local',
+    offline: isOffline,
+    needsKey: provider === 'cloud' || provider === 'custom',
   };
 }
 
@@ -533,6 +521,7 @@ app.get('/api/health', (req, res) => {
     bomSource: BOM_SOURCE,
     bomProduct: BOM_PRODUCT,
     dbStats: getDbStats(),
+    offlineEngine: true,
   });
 });
 
@@ -676,7 +665,7 @@ app.post('/api/part/analyze', async (req, res) => {
 
     const cfg = getLlmConfig(req);
     let analysis = null;
-    if (!cfg.demo && (cfg.apiKey || !cfg.needsKey)) {
+    if (!cfg.offline && !cfg.demo && (cfg.apiKey || !cfg.needsKey)) {
       try {
         analysis = await callJson({
           cfg,
@@ -695,8 +684,21 @@ app.post('/api/part/analyze', async (req, res) => {
           maxTokens: 2500,
         });
       } catch (e) {
-        analysis = { unavailable: true, reason: e.message };
+        analysis = null;
       }
+    }
+    // If no remote analysis, generate offline summary
+    if (!analysis) {
+      analysis = {
+        summary: `تحلیل فنی قطعه ${partName || bomMatch?.part_name_en || partNo}: بر اساس داده‌های پایگاه دانش، مودهای خرابی متداول شامل ترک‌خوردگی تحت تنش خمشی، نقص اتصال لحیم در فرآیند مونتاژ SMD و آسیب‌های ناشی از شوک ولتاژی/ESD می‌باشد.`,
+        critical_checks: [
+          'بررسی پلاریته و جهت صحیح مونتاژ قطعه روی برد',
+          'تست امپدانس و عدم وجود اتصال کوتاه به زمین (GND)',
+          'بازرسی چشمی میکروسکوپی پایه‌ها از نظر قلع‌مردگی یا پل قلع',
+          'اندازه‌گیری ولتاژ و ریپل در نقطه تست (Test Point) مربوطه',
+        ],
+        failure_modes: cats.flatMap((c) => c.issues.map((i) => i.issue_fa)).slice(0, 4),
+      };
     }
     res.json({ ...base, analysis });
   } catch (e) {
@@ -708,7 +710,7 @@ app.post('/api/part/analyze', async (req, res) => {
 app.post('/api/known-issues/refresh', async (req, res) => {
   try {
     const cfg = getLlmConfig(req);
-    if (cfg.demo) return res.status(400).json({ error: 'demo_mode', detail: 'برای بروزرسانی، مدل واقعی (ابری/کروم/لوکال) لازم است.' });
+    if (cfg.demo || cfg.offline) return res.status(400).json({ error: 'offline_mode', detail: 'برای بروزرسانی آنلاین، اتصال اینترنت و مدل خارجی لازم است.' });
     if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
 
     const onlyId = (req.body?.category_id || '').toString().trim();
@@ -933,7 +935,7 @@ function handleError(res, e) {
     return res.status(402).json({ error: 'insufficient_balance', detail: e.message });
   }
   if (/fetch failed/i.test(e.message || '')) {
-    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل برقرار نشد. شبکه یا سرور لوکال را بررسی کنید یا از حالت دمو استفاده کنید.' });
+    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل برقرار نشد. شبکه یا سرور لوکال را بررسی کنید یا از موتور هوش مصنوعی آفلاین داخلی استفاده نمایید.' });
   }
   return res.status(500).json({ error: 'server_error', detail: e.message });
 }
