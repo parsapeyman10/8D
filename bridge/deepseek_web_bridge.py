@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-پل وب DeepSeek — اتصال زنده، لاگین قطعی و تضمین احراز هویت در Google Chrome
-========================================================================
-این ماژول پنجره باز Google Chrome را راه‌اندازی کرده، اطلاعات کاربری ارائه‌شده
-توسط شما را به دقت در فرم ورود chat.deepseek.com وارد می‌کند، و تا زمانی که
-لاگین ۱۰۰٪ تایید نشود اجازه شروع عیب‌یابی را نمی‌دهد.
+پل وب اختصاصی DeepSeek — اتصال زنده و اتوماسیون ۱۰۰٪ سلنیومی در Google Chrome
+==============================================================================
+این ماژول از وب‌درایور رسمی Selenium WebDriver (پایتون) برای کنترل مرورگر
+گوگل کروم استفاده می‌کند. کلیه مراحل باز کردن تب، ورود به صفحه چت، سوئیچ به
+فرم پسورد، تایپ نام کاربری و کلمه عبور، پذیرش تیک قوانین، کلیک دکمه ورود،
+و ارسال/دریافت پاسخ‌ها از طریق ابزارهای بومی سلنیوم انجام می‌پذیرد.
 
 اطلاعات کاربری:
   Email:    Abraham.Hassanloo689@gmail.com
@@ -23,6 +24,12 @@ import time
 import uuid
 
 from flask import Flask, jsonify, request
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -41,7 +48,7 @@ LOGIN_STATUS = {
     "logged_in": False,
     "last_check": None,
     "email": DEEPSEEK_EMAIL,
-    "message": "در حال بررسی و تایید لاگین...",
+    "message": "در حال بررسی و اجرای اتوماسیون سلنیوم...",
 }
 
 app = Flask(__name__)
@@ -118,9 +125,8 @@ def cleanup_stale_locks(profile_path):
 
 def check_if_logged_in(d):
     """بررسی دقیق و مطمئن اینکه آیا کاربر در DeepSeek لاگین شده است یا خیر"""
-    from selenium.webdriver.common.by import By
     try:
-        # ۱. بررسی وجود چت‌باکس اصلی (نشان‌دهنده صفحه چت کامل)
+        # ۱. بررسی وجود چت‌باکس اصلی
         for sel in (
             "textarea#chat-input",
             "textarea[placeholder*='DeepSeek']",
@@ -137,11 +143,10 @@ def check_if_logged_in(d):
                     LOGIN_STATUS["message"] = "لاگین تایید و احراز هویت شد."
                     return True
 
-        # ۲. بررسی سایدبار چت یا آواتار کاربر
+        # ۲. بررسی سایدبار یا پروفایل کاربر
         for sel in (".ds-avatar", "[class*='avatar']", "[class*='user-profile']", ".ds-sidebar", "[class*='sidebar']"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
             if els and any(e.is_displayed() for e in els):
-                # اگر دکمه ورود روی صفحه نباشد، کاربر لاگین است
                 login_btns = d.find_elements(By.XPATH, "//button[contains(., 'Log In') or contains(., 'Sign in') or contains(., 'ورود')]")
                 if not any(b.is_displayed() for b in login_btns):
                     LOGIN_STATUS["logged_in"] = True
@@ -149,7 +154,7 @@ def check_if_logged_in(d):
                     LOGIN_STATUS["message"] = "لاگین تایید شد."
                     return True
 
-        # ۳. بررسی کوکی‌ها و LocalStorage
+        # ۳. بررسی LocalStorage
         try:
             user_token = d.execute_script("return localStorage.getItem('userToken') || localStorage.getItem('token') || sessionStorage.getItem('token');")
             if user_token:
@@ -169,41 +174,42 @@ def check_if_logged_in(d):
 
 def ensure_logged_in_strict(d, max_wait_seconds=120):
     """
-    اطمینان ۱۰۰٪ از لاگین بودن در DeepSeek.
-    اگر لاگین نبود، مشخصات را در فرم وارد کرده، تیک قوانین را می‌زند و ارسال می‌کند.
-    اگر کپچا باشد، منتظر تکمیل آن توسط کاربر می‌ماند و بدون لاگین قطعی ادامه نمی‌دهد.
+    اجرای اتوماسیون کامل ورود سلنیومی:
+    ۱. ناوبری به chat.deepseek.com
+    ۲. کلیک روی دکمه ورود و تب Password
+    ۳. تایپ نام کاربری و پسورد با Selenium Keys
+    ۴. کلیک روی چک‌باکس قوانین و دکمه Submit با ActionChains
+    ۵. انتظار برای تایید نهایی
     """
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.keys import Keys
-
     print("=" * 70)
-    print("🔍 در حال بررسی وضعیت لاگین حساب کاربری DeepSeek...")
-    print(f"📧 حساب کاربری: {DEEPSEEK_EMAIL}")
+    print("🤖 [اتوماسیون سلنیوم] در حال بررسی و انجام لاگین در DeepSeek...")
+    print(f"📧 ایمیل:    {DEEPSEEK_EMAIL}")
+    print("🔑 کلمه عبور: ********")
     print("=" * 70)
 
-    # ابتدا صفحه اصلی چت را باز کنیم
     if not d.current_url.startswith("https://chat.deepseek.com"):
         d.get(CHAT_URL)
         time.sleep(3)
 
     if check_if_logged_in(d):
-        print("🎉 [تایید شد] شما قبلاً در حساب کاربری DeepSeek لاگین شده‌اید!")
+        print("🎉 [سلنیوم] احراز هویت کاربر قبلاً انجام شده و چت آماده است!")
         return True
 
-    print("🔐 فرم ورود به حساب کاربری شناسایی شد. در حال اقدام برای لاگین خودکار...")
+    print("🔐 فرم ورود به حساب کاربری شناسایی شد. اجرای خودکار فرم لاگین با سلنیوم...")
 
-    # ۱. اگر دکمه "Log in" در صفحه است، روی آن کلیک کنیم
+    # ۱. کلیک دکمه لاگین در صورت وجود
     try:
-        login_triggers = d.find_elements(By.XPATH, "//button[contains(., 'Log in') or contains(., 'Sign In') or contains(., 'ورود') or contains(., 'Log In')]")
+        login_triggers = d.find_elements(By.XPATH, "//button[contains(., 'Log In') or contains(., 'Log in') or contains(., 'Sign in') or contains(., 'ورود')]")
         for btn in login_triggers:
             if btn.is_displayed():
-                btn.click()
+                ActionChains(d).move_to_element(btn).click().perform()
+                print("🖱️ [سلنیوم] روی دکمه ورود کلیک شد.")
                 time.sleep(1)
                 break
     except Exception:
         pass
 
-    # ۲. سوئیچ به تب لاگین با پسورد (Password Login)
+    # ۲. سوئیچ به تب Password Login با سلنیوم
     password_tab_found = False
     for xpath in [
         "//div[contains(text(), 'Password') or contains(text(), 'رمز') or contains(text(), 'Log in with password')]",
@@ -216,8 +222,8 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
             tabs = d.find_elements(By.XPATH, xpath)
             for tab in tabs:
                 if tab.is_displayed():
-                    d.execute_script("arguments[0].click();", tab)
-                    print("✅ تب 'ورود با رمز عبور (Password)' فعال شد.")
+                    ActionChains(d).move_to_element(tab).click().perform()
+                    print("🔘 [سلنیوم] تب 'ورود با پسورد' انتخاب شد.")
                     password_tab_found = True
                     time.sleep(0.5)
                     break
@@ -226,7 +232,7 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
         except Exception:
             pass
 
-    # ۳. وارد کردن ایمیل کاربری
+    # ۳. تایپ ایمیل با سلنیوم
     email_entered = False
     for sel in [
         "input[type='email']",
@@ -240,11 +246,11 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
             boxes = d.find_elements(By.CSS_SELECTOR, sel)
             for box in boxes:
                 if box.is_displayed() and box.is_enabled():
-                    box.click()
+                    ActionChains(d).move_to_element(box).click().perform()
                     box.send_keys(Keys.CONTROL + "a" if os.name == "nt" else Keys.COMMAND + "a")
                     box.send_keys(Keys.BACKSPACE)
                     box.send_keys(DEEPSEEK_EMAIL)
-                    print(f"📧 ایمیل '{DEEPSEEK_EMAIL}' در فیلد مربوطه وارد شد.")
+                    print(f"⌨️ [سلنیوم] ایمیل '{DEEPSEEK_EMAIL}' در فیلد ورودی تایپ شد.")
                     email_entered = True
                     time.sleep(0.4)
                     break
@@ -253,23 +259,23 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
         except Exception:
             pass
 
-    # ۴. وارد کردن رمز عبور
+    # ۴. تایپ کلمه عبور با سلنیوم
     password_entered = False
     for box in d.find_elements(By.CSS_SELECTOR, "input[type='password']"):
         try:
             if box.is_displayed() and box.is_enabled():
-                box.click()
+                ActionChains(d).move_to_element(box).click().perform()
                 box.send_keys(Keys.CONTROL + "a" if os.name == "nt" else Keys.COMMAND + "a")
                 box.send_keys(Keys.BACKSPACE)
                 box.send_keys(DEEPSEEK_PASSWORD)
-                print("🔑 رمز عبور با موفقیت تایپ شد.")
+                print("⌨️ [سلنیوم] کلمه عبور تایپ شد.")
                 password_entered = True
                 time.sleep(0.4)
                 break
         except Exception:
             pass
 
-    # ۵. زدن تیک قوانین و شرایط استفاده (Agreement Checkbox)
+    # ۵. زدن تیک موافقت با قوانین با سلنیوم
     for sel in [
         "input[type='checkbox']",
         ".ds-checkbox",
@@ -281,14 +287,17 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
             cbs = d.find_elements(By.CSS_SELECTOR, sel)
             for cb in cbs:
                 if cb.is_displayed():
-                    d.execute_script("arguments[0].click();", cb)
-                    print("☑️ تیک موافقت با قوانین زده شد.")
+                    try:
+                        ActionChains(d).move_to_element(cb).click().perform()
+                    except Exception:
+                        d.execute_script("arguments[0].click();", cb)
+                    print("☑️ [سلنیوم] تیک موافقت با قوانین زده شد.")
                     time.sleep(0.3)
                     break
         except Exception:
             pass
 
-    # ۶. کلیک روی دکمه ورود (Submit Log In Button)
+    # ۶. کلیک روی دکمه تایید نهایی و ورود با سلنیوم
     for sel in [
         "button[type='submit']",
         ".ds-button--primary",
@@ -299,15 +308,18 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
             btns = d.find_elements(By.XPATH, sel) if sel.startswith("//") else d.find_elements(By.CSS_SELECTOR, sel)
             for btn in btns:
                 if btn.is_displayed() and btn.is_enabled():
-                    d.execute_script("arguments[0].click();", btn)
-                    print("🚀 دکمه ورود (Log In) کلیک شد.")
+                    try:
+                        ActionChains(d).move_to_element(btn).click().perform()
+                    except Exception:
+                        d.execute_script("arguments[0].click();", btn)
+                    print("🚀 [سلنیوم] دکمه ورود (Log In) کلیک شد.")
                     time.sleep(1.5)
                     break
         except Exception:
             pass
 
-    # ۷. انتظار قطعی تا زمان احراز لاگین (و اطلاع‌رسانی در صورت وجود چالش کپچا)
-    print("⏳ در حال تایید وضعیت نهایی ورود به حساب DeepSeek...")
+    # ۷. مانیتورینگ وضعیت تا ورود قطعی
+    print("⏳ [سلنیوم] در حال نظارت بر بارگذاری چت و تایید نهایی ورود...")
     start_time = time.time()
     captcha_notified = False
 
@@ -315,23 +327,22 @@ def ensure_logged_in_strict(d, max_wait_seconds=120):
         time.sleep(2)
         if check_if_logged_in(d):
             print("=" * 70)
-            print("🎉 لاگین با موفقیت انجام و ۱۰۰٪ تایید شد! هوش مصنوعی آماده است.")
+            print("🎉 [سلنیوم] لاگین با موفقیت تایید شد! هوش مصنوعی آماده پاسخگویی است.")
             print("=" * 70)
             return True
 
-        # بررسی وجود کپچا یا پازل کشویی
         for sel in ("iframe[src*='geetest']", "iframe[src*='captcha']", ".geetest_holder", ".cf-turnstile", "[class*='captcha']"):
             try:
                 cap_els = d.find_elements(By.CSS_SELECTOR, sel)
                 if cap_els and any(c.is_displayed() for c in cap_els):
                     if not captcha_notified:
-                        print("⚠️ [توجه] چالش امنیتی (کپچا / پازل کشویی) در پنجره باز کروم ظاهر شده است.")
-                        print("👉 لطفاً در پنجره کروم، پازل امنیتی را بکشید تا لاگین کامل شود.")
+                        print("⚠️ [توجه] چالش امنیتی (کپچا / پازل کشویی) در پنجره کروم ظاهر شد.")
+                        print("👉 لطفاً پازل را در پنجره کروم بکشید تا لاگین تکمیل شود.")
                         captcha_notified = True
             except Exception:
                 pass
 
-    print("⚠️ هشدار: در مدت زمان مجاز لاگین قطعی احراز نشد.")
+    print("⚠️ هشدار: ورود در مهلت زمانی تایید نشد.")
     return False
 
 
@@ -362,7 +373,6 @@ def launch_visible_chrome():
     print(f"🚀 در حال باز کردن پنجره کروم: {chrome_bin}")
     try:
         _chrome_process = subprocess.Popen(cmd)
-        # صبر برای لیسن شدن پورت دیباگ
         for _ in range(30):
             if port_is_listening("127.0.0.1", DEBUG_PORT):
                 print(f"✅ پنجره Google Chrome باز شد (پورت دیباگ {DEBUG_PORT} فعال است).")
@@ -384,20 +394,18 @@ def get_driver():
         except Exception:
             _driver = None
 
-    from selenium import webdriver
-
     proxy = detect_local_proxy()
     if proxy:
         os.environ["HTTP_PROXY"] = proxy
         os.environ["HTTPS_PROXY"] = proxy
 
-    # روش ۱: باز کردن مستقیم کروم و اتصال از طریق Debugger Address
+    # روش ۱: اتصال سلنیوم به پنجره کروم باز شده
     if launch_visible_chrome():
         try:
             opts = webdriver.ChromeOptions()
             opts.add_experimental_option("debuggerAddress", f"127.0.0.1:{DEBUG_PORT}")
             _driver = webdriver.Chrome(options=opts)
-            print("🌐 وب‌درایور با موفقیت به پنجره کروم متصل گردید!")
+            print("🌐 [سلنیوم] وب‌درایور با موفقیت به پنجره کروم متصل گردید!")
             ensure_logged_in_strict(_driver)
             return _driver
         except Exception as e:
@@ -418,7 +426,7 @@ def get_driver():
         _driver = webdriver.Chrome(options=opts)
         _driver.get(CHAT_URL)
         ensure_logged_in_strict(_driver)
-        print("🌐 پنجره کروم با سلنیوم باز شد.")
+        print("🌐 [سلنیوم] پنجره کروم با وب‌درایور باز شد.")
         return _driver
     except Exception as e2:
         print(f"⚠️ روش دوم با خطا مواجه شد ({e2}). تلاش با پروفایل ایزوله...")
@@ -445,9 +453,6 @@ def get_driver():
 
 
 def find_input_box(d, timeout=60):
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-
     def probe(_):
         for sel in ("textarea#chat-input", "textarea[placeholder*='DeepSeek']", "textarea[placeholder*='Send']", "textarea", "div[contenteditable='true']", "[role='textbox']"):
             els = d.find_elements(By.CSS_SELECTOR, sel)
@@ -460,7 +465,6 @@ def find_input_box(d, timeout=60):
 
 
 def get_messages(d):
-    from selenium.webdriver.common.by import By
     for sel in (".ds-markdown", "[class*='markdown']", "[class*='message-content']", "[class*='message']"):
         els = d.find_elements(By.CSS_SELECTOR, sel)
         if els:
@@ -469,20 +473,23 @@ def get_messages(d):
 
 
 def ask_deepseek(prompt: str) -> str:
-    from selenium.webdriver.common.keys import Keys
     d = get_driver()
 
-    # قبل از ارسال سوال، وضعیت لاگین را مجدداً چک و تضمین می‌کنیم
     if not check_if_logged_in(d):
-        print("⚠️ عدم احراز لاگین قبل از ارسال پیام. اقدام مجدد برای ورود...")
+        print("⚠️ عدم احراز لاگین قبل از ارسال پیام. اقدام مجدد با سلنیوم...")
         if not ensure_logged_in_strict(d, max_wait_seconds=60):
-            raise RuntimeError("ابتدا باید وارد حساب DeepSeek شوید. لطفاً در پنجره کروم لاگین را کامل کنید.")
+            raise RuntimeError("ابتدا باید وارد حساب DeepSeek شوید. لطفاً لاگین را تایید نمایید.")
 
-    print("📩 در حال تایپ و ارسال سوال به پنجره DeepSeek در کروم...")
+    print("📩 [سلنیوم] در حال تایپ و ارسال سوال به پنجره DeepSeek در کروم...")
     box = find_input_box(d)
     before_count = len(get_messages(d))
 
-    # تایپ پرامپت در چت‌باکس
+    # تایپ با سلنیوم
+    try:
+        ActionChains(d).move_to_element(box).click().perform()
+    except Exception:
+        pass
+
     d.execute_script(
         """
         const el = arguments[0], text = arguments[1];
@@ -499,7 +506,7 @@ def ask_deepseek(prompt: str) -> str:
     )
     time.sleep(0.5)
     box.send_keys(Keys.ENTER)
-    print("⏳ منتظر دریافت کامل پاسخ از مدل DeepSeek...")
+    print("⏳ [سلنیوم] منتظر دریافت پاسخ هوش مصنوعی از صفحه چت...")
 
     deadline = time.time() + ANSWER_TIMEOUT
     last, stable = "", 0
@@ -510,7 +517,7 @@ def ask_deepseek(prompt: str) -> str:
         if cur and cur == last:
             stable += 1
             if stable >= 3:
-                print("📥 پاسخ مدل DeepSeek با موفقیت دریافت و تحویل داده شد!")
+                print("📥 [سلنیوم] پاسخ مدل DeepSeek دریافت شد!")
                 return cur
         else:
             stable = 0
@@ -578,7 +585,7 @@ def chat_completions():
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("  🌐 پل وب DeepSeek (پنجره باز و زنده Google Chrome)")
+    print("  🌐 پل وب DeepSeek (اتوماسیون کامل سلنیوم در Google Chrome)")
     print(f"  ایمیل ورود:    {DEEPSEEK_EMAIL}")
     print(f"  رمز عبور:      ********")
     print(f"  آدرس پل:       http://localhost:{PORT}/v1")
