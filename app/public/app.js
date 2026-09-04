@@ -183,12 +183,8 @@ function refreshKeyStatus() {
   els.keyDot.classList.toggle('ok', ok);
   els.keyText.textContent =
     c.provider === 'bridge' ? 'کروم DeepSeek 🌐'
-    : c.provider === 'claude' ? 'Claude 3.5 🧠'
-    : c.provider === 'gemini' ? 'Gemini ⚡'
-    : c.provider === 'offline' ? 'موتور آفلاین 🔌'
-    : c.provider === 'local' ? 'مدل محلی 🦙'
-    : ok ? 'سرویس ابری ☁️'
-    : 'تنظیم نشده';
+    : c.apiKey ? 'کلید API دیپ‌سیک 🔑'
+    : 'کروم DeepSeek 🌐';
 
   if (els.bridgeNotice) {
     els.bridgeNotice.style.display = c.provider === 'bridge' ? 'flex' : 'none';
@@ -218,26 +214,17 @@ setInterval(checkLoginStatus, 5000);
 checkLoginStatus();
 
 const providerRadios = () => [...document.querySelectorAll('input[name="provider"]')];
-const claudeFields = document.getElementById('claudeFields');
 const bridgeFields = document.getElementById('bridgeFields');
-const geminiFields = document.getElementById('geminiFields');
-const offlineFields = document.getElementById('offlineFields');
 const cloudFields = document.getElementById('cloudFields');
-const localFields = document.getElementById('localFields');
 const bridgeUrlInput = document.getElementById('bridgeUrlInput');
-const baseUrlInput = document.getElementById('baseUrlInput');
-const chatModelInput = document.getElementById('chatModelInput');
+const apiKeyInput = document.getElementById('apiKeyInput');
 const cloudBaseUrlInput = document.getElementById('cloudBaseUrlInput');
 const cloudChatModelInput = document.getElementById('cloudChatModelInput');
 
 function syncProviderFields() {
   const p = providerRadios().find(r => r.checked)?.value || 'bridge';
   if (bridgeFields) bridgeFields.style.display = p === 'bridge' ? 'block' : 'none';
-  if (claudeFields) claudeFields.style.display = p === 'claude' ? 'block' : 'none';
-  if (geminiFields) geminiFields.style.display = p === 'gemini' ? 'block' : 'none';
-  if (offlineFields) offlineFields.style.display = p === 'offline' ? 'block' : 'none';
   if (cloudFields) cloudFields.style.display = p === 'cloud' ? 'block' : 'none';
-  if (localFields) localFields.style.display = p === 'local' ? 'block' : 'none';
 }
 providerRadios().forEach(r => r.addEventListener('change', syncProviderFields));
 
@@ -245,13 +232,7 @@ els.settingsBtn.onclick = () => {
   const c = getConfig();
   providerRadios().forEach(r => r.checked = (r.value === c.provider));
   if (bridgeUrlInput) bridgeUrlInput.value = c.bridgeUrl || 'http://localhost:8765/v1';
-  if (els.claudeApiKeyInput) els.claudeApiKeyInput.value = c.claudeApiKey || '';
-  if (els.claudeModelSelect) els.claudeModelSelect.value = c.claudeModel || 'claude-3-5-sonnet-20241022';
-  if (els.geminiApiKeyInput) els.geminiApiKeyInput.value = c.geminiApiKey || '';
-  if (els.geminiModelSelect) els.geminiModelSelect.value = c.geminiModel || 'gemini-1.5-flash';
-  if (els.apiKeyInput) els.apiKeyInput.value = c.apiKey || '';
-  if (baseUrlInput) baseUrlInput.value = c.baseUrl || 'http://localhost:11434/v1';
-  if (chatModelInput) chatModelInput.value = c.chatModel || 'deepseek-r1:8b';
+  if (apiKeyInput) apiKeyInput.value = c.apiKey || '';
   if (cloudBaseUrlInput) cloudBaseUrlInput.value = c.cloudBaseUrl || 'https://api.deepseek.com';
   if (cloudChatModelInput) cloudChatModelInput.value = c.cloudChatModel || 'deepseek-chat';
   syncProviderFields();
@@ -264,45 +245,20 @@ els.saveKeyBtn.onclick = () => {
   saveConfig({
     provider,
     bridgeUrl: bridgeUrlInput ? bridgeUrlInput.value.trim() : 'http://localhost:8765/v1',
-    claudeApiKey: els.claudeApiKeyInput ? els.claudeApiKeyInput.value.trim() : '',
-    claudeModel: els.claudeModelSelect ? els.claudeModelSelect.value : 'claude-3-5-sonnet-20241022',
-    geminiApiKey: els.geminiApiKeyInput ? els.geminiApiKeyInput.value.trim() : '',
-    geminiModel: els.geminiModelSelect ? els.geminiModelSelect.value : 'gemini-1.5-flash',
-    apiKey: els.apiKeyInput ? els.apiKeyInput.value.trim() : '',
-    baseUrl: baseUrlInput ? baseUrlInput.value.trim() : '',
-    chatModel: chatModelInput ? chatModelInput.value.trim() : '',
-    cloudBaseUrl: cloudBaseUrlInput ? cloudBaseUrlInput.value.trim() : '',
-    cloudChatModel: cloudChatModelInput ? cloudChatModelInput.value.trim() : '',
+    apiKey: apiKeyInput ? apiKeyInput.value.trim() : '',
+    cloudBaseUrl: cloudBaseUrlInput ? cloudBaseUrlInput.value.trim() : 'https://api.deepseek.com',
+    cloudChatModel: cloudChatModelInput ? cloudChatModelInput.value.trim() : 'deepseek-chat',
   });
   els.settingsModal.classList.remove('show');
   refreshKeyStatus();
 };
 
-if (els.testClaudeBtn) {
-  els.testClaudeBtn.onclick = async () => {
-    const key = els.claudeApiKeyInput ? els.claudeApiKeyInput.value.trim() : '';
-    const model = els.claudeModelSelect ? els.claudeModelSelect.value : 'claude-3-5-sonnet-20241022';
-    if (!key) { alert('لطفاً ابتدا کلید Claude API را وارد کنید.'); return; }
-    els.testClaudeBtn.textContent = '⏳ در حال تست...';
-    try {
-      const res = await fetch('/api/claude/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: key, model }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        alert('🎉 اتصال به Anthropic Claude موفقیت‌آمیز بود!');
-      } else {
-        alert('❌ خطا در اتصال به Claude: ' + data.error);
-      }
-    } catch (e) {
-      alert('خطا در اتصال: ' + e.message);
-    } finally {
-      els.testClaudeBtn.textContent = '⚡ تست اتصال Claude';
-    }
-  };
-}
+els.clearKeyBtn.onclick = () => {
+  saveConfig({ provider: 'bridge', bridgeUrl: 'http://localhost:8765/v1', apiKey: '' });
+  providerRadios().forEach(r => r.checked = (r.value === 'bridge'));
+  syncProviderFields();
+  refreshKeyStatus();
+};
 
 els.clearKeyBtn.onclick = () => {
   saveConfig({ provider: 'bridge', bridgeUrl: 'http://localhost:8765/v1' });

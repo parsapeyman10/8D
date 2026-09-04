@@ -485,86 +485,33 @@
 <!-- Settings modal -->
 <div class="modal-backdrop" id="settingsModal">
   <div class="modal">
-    <h2>تنظیمات مدل هوش مصنوعی</h2>
+    <h2>تنظیمات مدل هوش مصنوعی DeepSeek</h2>
     <div class="provider-tabs">
-      <label><input type="radio" name="provider" value="bridge" checked /> 🌐 <b>مرورگر کروم و پل وب DeepSeek (پیش‌فرض اصلی سیستم)</b></label>
-      <label><input type="radio" name="provider" value="claude" /> 🧠 Anthropic Claude (Claude 3.5 Sonnet / Claude Code)</label>
-      <label><input type="radio" name="provider" value="gemini" /> ⚡ Google Gemini (gemini-1.5-flash — رایگان)</label>
-      <label><input type="radio" name="provider" value="offline" /> 🔌 موتور هوش مصنوعی آفلاین (بدون اینترنت و رایگان)</label>
-      <label><input type="radio" name="provider" value="cloud" /> ☁️ سایر سرویس‌های ابری (DeepSeek Cloud / OpenAI)</label>
-      <label><input type="radio" name="provider" value="local" /> 🦙 مدل‌های محلی سیستم (Ollama)</label>
-    </div>
-
-    <!-- Claude Fields -->
-    <div id="claudeFields" style="display:none">
-      <label class="fld">کلید Anthropic Claude API (یا کلیدهای چندگانه جداشده با کاما)
-        <input type="password" id="claudeApiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off" />
-      </label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <label class="fld">نسخه مدل Claude
-          <select id="claudeModelSelect">
-            <option value="claude-3-5-sonnet-20241022" selected>claude-3-5-sonnet (هوشمندترین)</option>
-            <option value="claude-3-5-haiku-20241022">claude-3-5-haiku (پرسرعت)</option>
-            <option value="claude-3-opus-20240229">claude-3-opus</option>
-          </select>
-        </label>
-        <div style="display:flex;align-items:flex-end">
-          <button type="button" id="testClaudeBtn" style="width:100%;padding:9px;background:var(--purple);color:#fff;font-size:12.5px;margin-bottom:10px">⚡ تست اتصال Claude</button>
-        </div>
-      </div>
+      <label><input type="radio" name="provider" value="bridge" checked /> 🌐 <b>اتصال مستقیم به مرورگر کروم و DeepSeek (پیش‌فرض)</b></label>
+      <label><input type="radio" name="provider" value="cloud" /> 🔑 <b>استفاده از کلید اختصاصی DeepSeek API Key</b></label>
     </div>
 
     <!-- Bridge Fields (Default) -->
     <div id="bridgeFields">
       <div style="background:rgba(2,132,199,.08);border:1px solid var(--accent);border-radius:10px;padding:12px;font-size:13px;line-height:1.9;margin-bottom:12px">
-        <b style="color:var(--accent)">🌐 حالت پیش‌فرض: پنجره باز Google Chrome برای DeepSeek</b><br>
-        با اجرای برنامه، پنجره کروم به سایت chat.deepseek.com متصل شده و سوالات عیب‌یابی را مستقیماً از هوش مصنوعی دریافت می‌کند.
+        <b style="color:var(--accent)">🌐 حالت فعال: پنجره باز Google Chrome برای DeepSeek</b><br>
+        با اجرای برنامه، پنجره کروم باز شده و سوالات عیب‌یابی مستقیماً با هوش مصنوعی DeepSeek تبادل می‌شوند.
       </div>
-      <label class="fld">آدرس پل ارتباطی
+      <label class="fld">آدرس پل وب محلی
         <input type="text" id="bridgeUrlInput" value="http://localhost:8765/v1" dir="ltr" />
       </label>
     </div>
 
-    <!-- Gemini Fields -->
-    <div id="geminiFields" style="display:none">
-      <label class="fld">کلید Google Gemini API
-        <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." autocomplete="off" />
-      </label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <label class="fld">نسخه مدل
-          <select id="geminiModelSelect">
-            <option value="gemini-1.5-flash" selected>gemini-1.5-flash</option>
-            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-          </select>
-        </label>
-      </div>
-    </div>
-
-    <!-- Offline Fields -->
-    <div id="offlineFields" style="display:none">
-      <div style="background:rgba(52,211,153,.08);border:1px solid var(--good);border-radius:10px;padding:12px;font-size:13px;line-height:1.9">
-        <b style="color:var(--good)">✅ حالت مستقل ۱۰۰٪ آفلاین:</b> اجرای محلی بدون نیاز به هیچ‌گونه اینترنت.
-      </div>
-    </div>
-
-    <!-- Cloud Fields -->
+    <!-- Cloud Fields (API Key) -->
     <div id="cloudFields" style="display:none">
-      <label class="fld">کلید API
-        <input type="password" id="apiKeyInput" placeholder="کلید API..." autocomplete="off" />
+      <label class="fld">کلید اختصاصی DeepSeek API Key
+        <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" />
       </label>
-      <label class="fld" style="margin-top:10px">آدرس سرور (Base URL)
-        <input type="text" id="cloudBaseUrlInput" placeholder="https://api.deepseek.com" dir="ltr" />
+      <label class="fld" style="margin-top:10px">آدرس سرور API
+        <input type="text" id="cloudBaseUrlInput" value="https://api.deepseek.com" dir="ltr" />
       </label>
-    </div>
-
-    <!-- Local Fields -->
-    <div id="localFields" style="display:none">
-      <label class="fld">آدرس سرور لوکال
-        <input type="text" id="baseUrlInput" placeholder="http://localhost:11434/v1" dir="ltr" />
-      </label>
-      <label class="fld">نام مدل
-        <input type="text" id="chatModelInput" placeholder="deepseek-r1:8b" dir="ltr" />
+      <label class="fld" style="margin-top:10px">نام مدل
+        <input type="text" id="cloudChatModelInput" value="deepseek-chat" dir="ltr" />
       </label>
     </div>
 
