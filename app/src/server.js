@@ -4,47 +4,27 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { TIER1_QUESTION_SELECTOR, TIER2_ANALYZER, PART_ANALYZER, ISSUE_UPDATER } from './prompts.js';
-import {
-  initDatabase,
-  saveCase,
-  updateCaseFeedback,
-  getAllCases,
-  addUserKnowledge,
-  getUserKnowledgeList,
-  deleteUserKnowledge,
-  findLearnedMemory,
-  getDbStats,
-} from './db.js';
-import { lookupDtc, DTC_DATABASE } from './dtc_db.js';
-import { getPinoutData, PINOUTS_DATABASE } from './pinouts_db.js';
-import { runOfflineStep, runOfflineReport } from './offline_engine.js';
-import { callGemini, testGemini } from './gemini.js';
-import { callClaude, testClaude } from './claude.js';
-import { resilientCall, getGatewayStatus } from './provider_gateway.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
-const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'bridge';
-const BRIDGE_URL = process.env.BRIDGE_URL || 'http://127.0.0.1:8765/v1';
-const ENV_GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const ENV_DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
-const ENV_CLAUDE_KEY = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
-const DEFAULT_MAX_QUESTIONS = 8;
-
-// Initialize Learning Database
-initDatabase();
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+const ENV_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+const CHAT_MODEL = process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat';
+const REASONER_MODEL = process.env.DEEPSEEK_REASONER_MODEL || 'deepseek-reasoner';
+const MAX_QUESTIONS = 8;
 
 // ---- in-memory session store ----
 const sessions = new Map();
 
 // ---- BOM (Bill of Materials) ----
+// Priority 1: a real product BOM in Excel (BOM.xlsx at repo root or app/data, or BOM_XLSX env)
+// Priority 2: the generic vehicle-parts CSV (app/data/bom.csv, or BOM_PATH env)
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const XLSX = require('xlsx');
 
 const BOM_PATH = process.env.BOM_PATH || path.join(__dirname, '..', 'data', 'bom.csv');
 const BOM_XLSX_CANDIDATES = [
@@ -57,23 +37,26 @@ let BOM = [];
 let BOM_SOURCE = 'none';
 let BOM_PRODUCT = '';
 
-function parseBomWorkbook(wb, sourceLabel = 'xlsx') {
+function loadBomXlsx(file) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.readFile(file);
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-  let product = '';
+  // product name from the header block
   for (const row of rows.slice(0, 8)) {
     const i = row.findIndex((c) => /product\s*name/i.test(String(c)));
     if (i >= 0) {
-      product = row.slice(i + 1).map(String).find((c) => c.trim()) || '';
+      BOM_PRODUCT = row.slice(i + 1).map(String).find((c) => c.trim()) || '';
       break;
     }
   }
 
+  // locate the header row of the parts table
   const headIdx = rows.findIndex(
     (r) => r.some((c) => /part\s*name/i.test(String(c))) && r.some((c) => /designator/i.test(String(c)))
   );
-  if (headIdx < 0) throw new Error('ستون‌های جدول BOM (شامل Part Name و Designator) پیدا نشد.');
+  if (headIdx < 0) throw new Error('parts table header not found');
   const head = rows[headIdx].map((c) => String(c).trim());
   const col = (re) => head.findIndex((h) => re.test(h));
   const cItem = col(/^item$/i), cDes = col(/designator/i), cName = col(/part\s*name/i);
@@ -100,20 +83,27 @@ function parseBomWorkbook(wb, sourceLabel = 'xlsx') {
       notes: String(r[cNote] ?? '').trim(),
     });
   }
+  return parts;
+}
 
-  BOM = parts;
-  BOM_SOURCE = sourceLabel;
-  BOM_PRODUCT = product;
-  return { count: parts.length, product };
+function loadBomCsv() {
+  const lines = fs.readFileSync(BOM_PATH, 'utf8').trim().split(/\r?\n/);
+  const head = lines[0].split(',').map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cols = line.split(',');
+    const row = {};
+    head.forEach((h, i) => (row[h] = (cols[i] || '').trim()));
+    return row;
+  }).filter((r) => r.part_code);
 }
 
 function loadBom() {
   for (const file of BOM_XLSX_CANDIDATES) {
     try {
       if (fs.existsSync(file)) {
-        const wb = XLSX.readFile(file);
-        const res = parseBomWorkbook(wb, 'xlsx');
-        console.log(`BOM (Excel) loaded: ${res.count} parts from ${file}${res.product ? ` — product: ${res.product}` : ''}`);
+        BOM = loadBomXlsx(file);
+        BOM_SOURCE = 'xlsx';
+        console.log(`BOM (Excel) loaded: ${BOM.length} parts from ${file}${BOM_PRODUCT ? ` — product: ${BOM_PRODUCT}` : ''}`);
         return;
       }
     } catch (e) {
@@ -121,14 +111,7 @@ function loadBom() {
     }
   }
   try {
-    const lines = fs.readFileSync(BOM_PATH, 'utf8').trim().split(/\r?\n/);
-    const head = lines[0].split(',').map((h) => h.trim());
-    BOM = lines.slice(1).map((line) => {
-      const cols = line.split(',');
-      const row = {};
-      head.forEach((h, i) => (row[h] = (cols[i] || '').trim()));
-      return row;
-    }).filter((r) => r.part_code);
+    BOM = loadBomCsv();
     BOM_SOURCE = 'csv';
     console.log(`BOM (CSV) loaded: ${BOM.length} parts from ${BOM_PATH}`);
   } catch (e) {
@@ -140,7 +123,9 @@ loadBom();
 
 function bomForSystem(system) {
   if (!BOM.length) return [];
-  if (BOM_SOURCE === 'xlsx' || BOM_SOURCE === 'upload') return BOM;
+  // A product BOM (Excel) is the actual bill of the unit under diagnosis:
+  // always relevant, regardless of the classified vehicle system.
+  if (BOM_SOURCE === 'xlsx') return BOM;
   if (!system) return [];
   return BOM.filter((p) => p.system === system).slice(0, 30);
 }
@@ -156,7 +141,7 @@ function bomPartsForModel(system) {
   }));
 }
 
-// ---- Known-issues database ----
+// ---- Known-issues database (per-component failure knowledge, refreshable) ----
 const KNOWN_ISSUES_PATH = process.env.KNOWN_ISSUES_PATH || path.join(__dirname, '..', 'data', 'known_issues.json');
 let KNOWN_ISSUES = { updated_at: '', categories: [] };
 function loadKnownIssues() {
@@ -198,6 +183,7 @@ function findBomPart(partName, partNo) {
   return bestScore >= 2 ? best : null;
 }
 
+// quick keyword classifier so the BOM filter works from the first question
 const SYSTEM_KEYWORDS = [
   ['brakes', /ترمز|لنت|ABS|brake/i],
   ['SRS/airbag', /ایربگ|کیسه\s*هوا|airbag|srs/i],
@@ -215,16 +201,11 @@ function quickClassify(symptom) {
   return '';
 }
 
-function newState(symptom, language = 'fa', useBom = true, maxQuestions = DEFAULT_MAX_QUESTIONS) {
-  const system = quickClassify(symptom);
-  const learned = findLearnedMemory(symptom, system);
+function newState(symptom, language) {
   return {
     symptom,
-    system,
+    system: quickClassify(symptom),
     language,
-    use_bom: useBom,
-    max_questions: maxQuestions,
-    learned_memory: learned,
     question_count: 0,
     checks_done: [],
     findings: [],
@@ -233,8 +214,12 @@ function newState(symptom, language = 'fa', useBom = true, maxQuestions = DEFAUL
     unresolved_conflicts: [],
     known_issue_matches: [],
     pending_question: null,
-    phase: 'interview',
+    phase: 'interview', // interview | escalated | concluded
   };
+}
+
+function detectLanguage(text) {
+  return /[\u0600-\u06FF]/.test(text) ? 'fa' : 'en';
 }
 
 const SAFETY_PATTERNS = [
@@ -254,22 +239,24 @@ function quickSafetyCheck(text) {
   return SAFETY_PATTERNS.some((re) => re.test(text));
 }
 
-function fallbackLabel() {
-  return 'هیچ‌کدام / مطابقت ندارد — لطفاً توضیح بدهید';
+function fallbackLabel(lang) {
+  return lang === 'fa'
+    ? 'هیچ‌کدام / مطابقت ندارد — لطفاً توضیح بدهید'
+    : 'None of the above / does not match - please describe';
 }
 
-function ensureFallbackOption(options) {
-  const fb = fallbackLabel();
+function ensureFallbackOption(options, lang) {
+  const fb = fallbackLabel(lang);
   const opts = Array.isArray(options) ? options.filter((o) => typeof o === 'string' && o.trim()) : [];
   const hasFb = opts.some((o) => /هیچ.?کدام|مطابقت ندارد|none of the above|does not match/i.test(o));
   if (!hasFb) opts.push(fb);
   return opts;
 }
 
-// ---- Generic LLM call helper ----
-async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 3000 }) {
+// ---- LLM call helper (DeepSeek cloud OR any OpenAI-compatible local server: Ollama, LM Studio, vLLM...) ----
+async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = true, maxTokens = 2000 }) {
   const body = {
-    model: model || 'deepseek-web',
+    model,
     temperature,
     max_tokens: maxTokens,
     messages: [
@@ -277,10 +264,11 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
       { role: 'user', content: user },
     ],
   };
-  if (jsonMode && !/reasoner|r1/i.test(model || '')) {
+  // reasoning models (deepseek-reasoner / R1) don't support response_format reliably
+  if (jsonMode && !/reasoner|r1/i.test(model)) {
     body.response_format = { type: 'json_object' };
   }
-  const base = (cfg.baseUrl || (cfg.provider === 'bridge' ? BRIDGE_URL : 'https://api.deepseek.com')).replace(/\/+$/, '');
+  const base = (cfg.baseUrl || DEEPSEEK_BASE_URL).replace(/\/+$/, '');
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -291,7 +279,7 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    const err = new Error(`LLM error ${res.status}: ${text.slice(0, 500)}`);
+    const err = new Error(`DeepSeek API error ${res.status}: ${text.slice(0, 500)}`);
     err.status = res.status;
     throw err;
   }
@@ -301,11 +289,13 @@ async function callDeepSeek({ cfg, model, system, user, temperature, jsonMode = 
 
 function tryParseJson(text) {
   if (!text) return null;
+  // strip reasoning tags (local R1 models) and markdown fences if present
   let t = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   t = t.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   try {
     return JSON.parse(t);
   } catch {
+    // try to extract first {...} block
     const start = t.indexOf('{');
     const end = t.lastIndexOf('}');
     if (start >= 0 && end > start) {
@@ -320,24 +310,7 @@ function tryParseJson(text) {
 }
 
 async function callJson(opts, retries = 1) {
-  const cfg = opts.cfg;
-  let content = '';
-
-  if (cfg.provider === 'gemini') {
-    content = await callGemini({
-      apiKey: cfg.apiKey || ENV_GEMINI_KEY,
-      model: opts.model || cfg.chatModel || 'gemini-1.5-flash',
-      system: opts.system,
-      user: opts.user,
-      temperature: opts.temperature ?? 0.1,
-      jsonMode: true,
-      maxTokens: opts.maxTokens || 3500,
-      baseUrl: cfg.baseUrl,
-    });
-  } else {
-    content = await callDeepSeek(opts);
-  }
-
+  let content = await callDeepSeek(opts);
   let parsed = tryParseJson(content);
   while (parsed === null && retries > 0) {
     retries -= 1;
@@ -352,190 +325,204 @@ async function callJson(opts, retries = 1) {
 
 function caseStateForModel(state) {
   const { pending_question, phase, ...rest } = state;
-  const useBom = state.use_bom !== false;
   return {
     ...rest,
-    ...(useBom && BOM_PRODUCT ? { bom_product: BOM_PRODUCT } : {}),
-    ...(useBom ? { bom_parts: bomPartsForModel(state.system) } : {}),
-    learned_memory: state.learned_memory || [],
-    max_questions: state.max_questions || DEFAULT_MAX_QUESTIONS,
+    ...(BOM_PRODUCT ? { bom_product: BOM_PRODUCT } : {}),
+    bom_parts: bomPartsForModel(state.system),
   };
 }
 
 // ---- Tier 1: next question ----
 async function nextStep(cfg, state) {
-  if (state.question_count >= state.max_questions) return { conclude: true };
-  if (cfg.provider === 'offline' || cfg.offline) {
-    return runOfflineStep(state);
+  // hard cap enforced in code
+  if (state.question_count >= MAX_QUESTIONS) return { conclude: true };
+  if (cfg.demo) return demoNextStep(state);
+
+  const parsed = await callJson({
+    cfg,
+    model: cfg.chatModel,
+    system: TIER1_QUESTION_SELECTOR,
+    user: JSON.stringify(caseStateForModel(state)),
+    temperature: 0,
+  });
+
+  if (!parsed) {
+    // fallback: safe broad question or conclude
+    if (state.question_count >= MAX_QUESTIONS) return { conclude: true };
+    const lang = state.language;
+    return {
+      question:
+        lang === 'fa'
+          ? 'این مشکل از چه زمانی شروع شد؟'
+          : 'When did this problem start?',
+      options:
+        lang === 'fa'
+          ? ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم', fallbackLabel('fa')]
+          : ['Recently and suddenly', 'Gradually over weeks', 'Since the beginning', 'Not sure', fallbackLabel('en')],
+      leading_hypotheses: state.leading_hypotheses,
+      ruled_out: state.ruled_out,
+      _fallback: true,
+    };
   }
-
-  try {
-    const { result, provider, model } = await resilientCall({
-      preferredProvider: cfg.provider || 'bridge',
-      system: TIER1_QUESTION_SELECTOR,
-      user: JSON.stringify(caseStateForModel(state)),
-      temperature: 0.1,
-      maxTokens: 3500,
-      state,
-      customConfig: {
-        claudeKey: cfg.claudeKey,
-        claudeModel: cfg.claudeModel,
-        claudeBaseUrl: cfg.claudeBaseUrl,
-        geminiKey: cfg.apiKey,
-        geminiModel: cfg.chatModel,
-        geminiBaseUrl: cfg.baseUrl,
-        bridgeUrl: cfg.baseUrl,
-      },
-    });
-
-    if (result) {
-      console.log(`[Tier 1] پاسخ سوال با موفقیت از مدل ${provider} (${model}) دریافت شد.`);
-      return result;
-    }
-  } catch (err) {
-    console.warn(`⚠️ خطا در دریافت پاسخ از هوش مصنوعی: ${err.message}. سوییچ خودکار به موتور آفلاین.`);
-    return runOfflineStep(state);
-  }
-
-  return runOfflineStep(state);
+  return parsed;
 }
 
 // ---- Tier 2: final report ----
 async function finalReport(cfg, state) {
-  if (cfg.provider === 'offline' || cfg.offline) {
-    return runOfflineReport(state);
-  }
+  if (cfg.demo) return demoFinalReport(state);
+  const parsed = await callJson({
+    cfg,
+    model: cfg.reasonerModel,
+    system: TIER2_ANALYZER,
+    user: JSON.stringify(caseStateForModel(state)),
+    temperature: 0.1,
+    maxTokens: 4000,
+  });
+  if (parsed && Array.isArray(parsed.root_causes)) return parsed;
 
-  try {
-    const { result, provider, model } = await resilientCall({
-      preferredProvider: cfg.provider || 'bridge',
-      system: TIER2_ANALYZER,
-      user: JSON.stringify(caseStateForModel(state)),
-      temperature: 0.1,
-      maxTokens: 4000,
-      state: { ...state, phase: 'concluding' },
-      customConfig: {
-        claudeKey: cfg.claudeKey,
-        claudeModel: cfg.claudeModel,
-        claudeBaseUrl: cfg.claudeBaseUrl,
-        geminiKey: cfg.apiKey,
-        geminiModel: cfg.chatModel,
-        geminiBaseUrl: cfg.baseUrl,
-        bridgeUrl: cfg.baseUrl,
-      },
-    });
-
-    if (result && Array.isArray(result.root_causes)) {
-      console.log(`[Tier 2] گزارش نهایی 8D با موفقیت از مدل ${provider} (${model}) دریافت گردید.`);
-      return result;
-    }
-  } catch (err) {
-    console.warn(`⚠️ خطا در دریافت گزارش نهایی: ${err.message}. صدور گزارش از طریق موتور آفلاین.`);
-    return runOfflineReport(state);
-  }
-
-  return runOfflineReport(state);
+  // fallback: build report from leading hypotheses
+  const lang = state.language;
+  return {
+    root_causes: (state.leading_hypotheses || []).slice(0, 3).map((h) => ({
+      cause: h.hypothesis,
+      confidence: Math.min(h.confidence ?? 30, 90),
+      band: (h.confidence ?? 30) >= 70 ? 'High' : (h.confidence ?? 30) >= 40 ? 'Medium' : 'Low',
+      evidence: lang === 'fa' ? 'بر اساس پاسخ‌های ثبت‌شده در مصاحبه عیب‌یابی' : 'Based on recorded interview findings',
+    })),
+    unresolved_conflicts: state.unresolved_conflicts || [],
+    recommended_actions: [
+      lang === 'fa'
+        ? 'بازرسی فیزیکی و بررسی با دستگاه دیاگ طبق مستندات رسمی IKCO/OEM'
+        : 'Physical inspection and scan-tool check per official IKCO/OEM documentation',
+    ],
+    escalate_if: [
+      lang === 'fa'
+        ? 'تکرار خرابی در چند خودرو یا وجود ریسک ایمنی'
+        : 'Failure repeats across vehicles or a safety risk exists',
+    ],
+    _fallback: true,
+  };
 }
 
-function escalationPayload(reason) {
+function escalationPayload(lang, reason) {
+  if (lang === 'fa') {
+    return {
+      escalated: true,
+      title: 'ارجاع فوری',
+      reason: reason || 'این مورد می‌تواند ایمنی خودرو یا سرنشینان را تحت تأثیر قرار دهد.',
+      required_action:
+        'خودرو نباید تا زمان بررسی توسط تکنسین ارشد / واحد مهندسی / مرجع مجاز، به‌صورت عادی استفاده شود.',
+      do_not:
+        'هیچ سیستم ایمنی، ترمز، فرمان، ایربگ، ABS، ایموبلایزر یا آلایندگی را برای تست غیرفعال، دور زده یا override نکنید.',
+    };
+  }
   return {
     escalated: true,
-    title: 'ارجاع فوری',
-    reason: reason || 'این مورد می‌تواند ایمنی خودرو یا مدار را تحت تأثیر قرار دهد.',
-    required_action: 'دستگاه/خودرو نباید تا زمان بررسی توسط تکنسین ارشد / واحد مهندسی به‌صورت عادی استفاده شود.',
-    do_not: 'هیچ سیستم ایمنی، ترمز، فرمان، ایربگ، ABS، یا مدارهای حفاظتی را دور نزنید.',
+    title: 'Immediate Escalation',
+    reason: reason || 'This issue may affect vehicle or occupant safety.',
+    required_action:
+      'The vehicle should not be used normally until inspected by a senior technician / engineering team / authorized authority.',
+    do_not:
+      'Do not disable, bypass, override, unplug, or defeat any safety, brake, steering, airbag, ABS, immobilizer, or emissions system for testing.',
   };
 }
 
 function getApiKey(req) {
-  return (
-    (req.headers['x-gemini-key'] || '').toString().trim() ||
-    (req.headers['x-deepseek-key'] || '').toString().trim() ||
-    ENV_GEMINI_KEY ||
-    ENV_DEEPSEEK_KEY
-  );
+  return (req.headers['x-deepseek-key'] || '').toString().trim() || ENV_API_KEY;
 }
 
+// Build per-request LLM config from headers (set by the settings UI) with env fallbacks.
 function getLlmConfig(req) {
-  const provider = (req.headers['x-provider'] || '').toString().trim() || DEFAULT_PROVIDER;
+  const provider = (req.headers['x-provider'] || '').toString().trim() || (process.env.LLM_PROVIDER || 'cloud');
   const apiKey = getApiKey(req);
-  const claudeKey = (req.headers['x-claude-key'] || '').toString().trim() || ENV_CLAUDE_KEY;
-  const claudeModel = (req.headers['x-claude-model'] || '').toString().trim() || 'claude-3-5-sonnet-20241022';
   const headerBase = (req.headers['x-base-url'] || '').toString().trim();
-  const chatModel = (req.headers['x-chat-model'] || '').toString().trim();
-  const reasonerModel = (req.headers['x-reasoner-model'] || '').toString().trim();
+  const chatModel = (req.headers['x-chat-model'] || '').toString().trim() || CHAT_MODEL;
+  const reasonerModel = (req.headers['x-reasoner-model'] || '').toString().trim() || REASONER_MODEL;
 
-  // 1. Anthropic Claude (Claude Code / 3.5 Sonnet)
-  if (provider === 'claude') {
-    return {
-      provider: 'claude',
-      claudeKey: claudeKey || apiKey || ENV_CLAUDE_KEY,
-      claudeModel: claudeModel || chatModel || 'claude-3-5-sonnet-20241022',
-      claudeBaseUrl: headerBase || 'https://api.anthropic.com/v1',
-      chatModel: claudeModel,
-      reasonerModel: claudeModel,
-      demo: false,
-      offline: false,
-      needsKey: true,
-    };
-  }
-
-  // 2. DeepSeek Selenium Chrome Bridge (Default)
-  if (provider === 'bridge') {
-    return {
-      provider: 'bridge',
-      apiKey: 'bridge',
-      baseUrl: headerBase || BRIDGE_URL,
-      chatModel: chatModel || 'deepseek-web-chrome',
-      reasonerModel: reasonerModel || chatModel || 'deepseek-web-chrome',
-      claudeKey,
-      claudeModel,
-      demo: false,
-      offline: false,
-      needsKey: false,
-    };
-  }
-
-  // 3. Google Gemini
-  if (provider === 'gemini') {
-    return {
-      provider: 'gemini',
-      apiKey: apiKey || ENV_GEMINI_KEY,
-      baseUrl: headerBase || 'https://generativelanguage.googleapis.com/v1beta',
-      chatModel: chatModel || 'gemini-1.5-flash',
-      reasonerModel: reasonerModel || chatModel || 'gemini-1.5-flash',
-      claudeKey,
-      claudeModel,
-      demo: false,
-      offline: false,
-      needsKey: true,
-    };
-  }
-
-  if (provider === 'offline' || provider === 'local_offline') {
-    return { provider: 'offline', offline: true, needsKey: false };
-  }
-
-  let baseUrl = 'https://api.deepseek.com';
-  if (provider === 'local' || provider === 'ollama') {
+  let baseUrl = DEEPSEEK_BASE_URL;
+  if (provider === 'local') {
     baseUrl = headerBase || process.env.LOCAL_BASE_URL || 'http://localhost:11434/v1';
-  } else if (provider === 'lmstudio') {
-    baseUrl = headerBase || 'http://localhost:1234/v1';
   } else if (headerBase) {
     baseUrl = headerBase;
+  }
+  // basic validation
+  if (!/^https?:\/\//i.test(baseUrl)) baseUrl = DEEPSEEK_BASE_URL;
+
+  // For non-DeepSeek providers, "deepseek-reasoner" would be an invalid model:
+  // default the reasoner to the chat model when a custom base URL is used.
+  let effReasoner = reasonerModel;
+  if (!req.headers['x-reasoner-model'] && headerBase && !/deepseek\.com/i.test(baseUrl)) {
+    effReasoner = (req.headers['x-chat-model'] || '').toString().trim() || chatModel;
   }
 
   return {
     provider,
     apiKey,
     baseUrl,
-    chatModel: chatModel || 'deepseek-chat',
-    reasonerModel: reasonerModel || chatModel || 'deepseek-reasoner',
-    claudeKey,
-    claudeModel,
-    demo: false,
-    offline: false,
-    needsKey: provider === 'cloud' || provider === 'custom',
+    chatModel: provider === 'local' && !req.headers['x-chat-model'] ? (process.env.LOCAL_MODEL || chatModel) : chatModel,
+    reasonerModel: provider === 'local' && !req.headers['x-reasoner-model'] ? (process.env.LOCAL_MODEL || effReasoner) : effReasoner,
+    demo: isDemoKey(apiKey),
+    // local servers don't need a key; cloud does (unless demo)
+    needsKey: provider !== 'local',
+  };
+}
+
+function isDemoKey(apiKey) {
+  return process.env.DEMO_MODE === '1' || /^demo$/i.test(apiKey);
+}
+
+// ---- Demo mode (no external API calls) ----
+const DEMO_QUESTIONS = {
+  fa: [
+    { question: 'این مشکل از چه زمانی شروع شد؟', options: ['به‌تازگی و ناگهانی', 'به‌تدریج طی چند هفته', 'از ابتدا وجود داشته', 'مطمئن نیستم'] },
+    { question: 'مشکل در چه شرایطی بیشتر خود را نشان می‌دهد؟', options: ['فقط در استارت سرد', 'فقط پس از گرم شدن', 'در همه شرایط', 'فقط زیر بار / سربالایی'] },
+    { question: 'آیا چراغ هشداری روی صفحه کیلومتر روشن است؟', options: ['بله، چراغ چک', 'بله، چراغ دیگری', 'خیر، هیچ چراغی روشن نیست', 'مطمئن نیستم'] },
+    { question: 'آخرین سرویس دوره‌ای (روغن/فیلتر) چه زمانی انجام شده است؟', options: ['کمتر از ۵ هزار کیلومتر پیش', 'بین ۵ تا ۱۰ هزار کیلومتر پیش', 'بیش از ۱۰ هزار کیلومتر پیش / نمی‌دانم'] },
+  ],
+  en: [
+    { question: 'When did this problem start?', options: ['Recently and suddenly', 'Gradually over weeks', 'Since the beginning', 'Not sure'] },
+    { question: 'Under which condition does the problem appear most?', options: ['Only on cold start', 'Only after warm-up', 'All conditions', 'Only under load / uphill'] },
+    { question: 'Is any warning light on in the instrument cluster?', options: ['Yes, check engine light', 'Yes, another light', 'No lights on', 'Not sure'] },
+    { question: 'When was the last periodic service (oil/filter)?', options: ['Less than 5,000 km ago', '5,000-10,000 km ago', 'More than 10,000 km / not sure'] },
+  ],
+};
+
+function demoNextStep(state) {
+  const qs = DEMO_QUESTIONS[state.language] || DEMO_QUESTIONS.fa;
+  if (state.question_count >= qs.length) return { conclude: true };
+  const q = qs[state.question_count];
+  const hypos = state.language === 'fa'
+    ? [
+        { hypothesis: 'فرضیه نمونه ۱ (حالت دمو — بدون اتصال به DeepSeek)', confidence: 55 - state.question_count * 3 },
+        { hypothesis: 'فرضیه نمونه ۲', confidence: 30 },
+      ]
+    : [
+        { hypothesis: 'Sample hypothesis 1 (demo mode — no DeepSeek connection)', confidence: 55 - state.question_count * 3 },
+        { hypothesis: 'Sample hypothesis 2', confidence: 30 },
+      ];
+  return { ...q, system: state.system || 'other', leading_hypotheses: hypos, ruled_out: state.ruled_out };
+}
+
+function demoFinalReport(state) {
+  const fa = state.language === 'fa';
+  return {
+    root_causes: [
+      {
+        cause: fa
+          ? 'این یک گزارش نمونه است — برای تحلیل واقعی، کلید DeepSeek API را در تنظیمات وارد کنید.'
+          : 'This is a sample report — enter a real DeepSeek API key in settings for actual analysis.',
+        confidence: 50,
+        band: 'Medium',
+        evidence: fa ? 'حالت دمو: پاسخ‌ها ثبت شد ولی تحلیل مدل انجام نشد.' : 'Demo mode: answers recorded but no model analysis was run.',
+      },
+    ],
+    unresolved_conflicts: [],
+    recommended_actions: [
+      fa ? 'کلید واقعی DeepSeek را از platform.deepseek.com دریافت و در «تنظیمات API» وارد کنید.' : 'Get a real DeepSeek key from platform.deepseek.com and enter it in API settings.',
+      fa ? 'در استقرار واقعی، بازرسی فیزیکی و دیاگ طبق مستندات رسمی IKCO/OEM انجام شود.' : 'In real deployment, perform physical inspection and scan-tool check per official IKCO/OEM documentation.',
+    ],
+    escalate_if: [fa ? 'وجود هرگونه ریسک ایمنی' : 'Any safety risk exists'],
+    demo: true,
   };
 }
 
@@ -545,57 +532,9 @@ function applyStateUpdates(state, parsed) {
   if (typeof parsed.system === 'string' && parsed.system) state.system = parsed.system;
 }
 
-// ---- ROUTES ----
-
+// ---- routes ----
 app.get('/api/health', (req, res) => {
-  res.json({
-    ok: true,
-    defaultProvider: DEFAULT_PROVIDER,
-    bridgeUrl: BRIDGE_URL,
-    hasGeminiKey: Boolean(ENV_GEMINI_KEY),
-    hasDeepseekKey: Boolean(ENV_DEEPSEEK_KEY),
-    maxQuestions: DEFAULT_MAX_QUESTIONS,
-    bomParts: BOM.length,
-    bomSource: BOM_SOURCE,
-    bomProduct: BOM_PRODUCT,
-    dbStats: getDbStats(),
-    offlineEngine: true,
-  });
-});
-
-// One-Click Gemini Live Connection Test
-app.post('/api/gemini/test', async (req, res) => {
-  try {
-    const apiKey = (req.body?.apiKey || '').toString().trim() || ENV_GEMINI_KEY;
-    const model = (req.body?.model || '').toString().trim() || 'gemini-1.5-flash';
-    if (!apiKey) {
-      return res.status(400).json({ ok: false, error: 'لطفاً ابتدا کلید Gemini API را وارد کنید.' });
-    }
-    const result = await testGemini(apiKey, model);
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message || 'خطا در برقراری ارتباط با Google Gemini' });
-  }
-});
-
-// One-Click Claude Live Connection Test
-app.post('/api/claude/test', async (req, res) => {
-  try {
-    const apiKey = (req.body?.apiKey || '').toString().trim() || ENV_CLAUDE_KEY;
-    const model = (req.body?.model || '').toString().trim() || 'claude-3-5-sonnet-20241022';
-    if (!apiKey) {
-      return res.status(400).json({ ok: false, error: 'لطفاً ابتدا کلید Claude / Anthropic API را وارد کنید.' });
-    }
-    const result = await testClaude(apiKey, model);
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message || 'خطا در برقراری ارتباط با Claude' });
-  }
-});
-
-// Gateway Status
-app.get('/api/gateway/status', (req, res) => {
-  res.json(getGatewayStatus());
+  res.json({ ok: true, hasEnvKey: Boolean(ENV_API_KEY), maxQuestions: MAX_QUESTIONS, bomParts: BOM.length, bomSource: BOM_SOURCE, bomProduct: BOM_PRODUCT });
 });
 
 app.get('/api/bom', (req, res) => {
@@ -603,186 +542,54 @@ app.get('/api/bom', (req, res) => {
   res.json({ total: BOM.length, source: BOM_SOURCE, product: BOM_PRODUCT, parts: system ? bomForSystem(system) : BOM });
 });
 
-// Upload direct BOM Excel file
-app.post('/api/bom/upload', (req, res) => {
-  try {
-    const { base64, filename } = req.body || {};
-    if (!base64) return res.status(400).json({ error: 'base64 data required' });
-    const buffer = Buffer.from(base64, 'base64');
-    const wb = XLSX.read(buffer, { type: 'buffer' });
-    const result = parseBomWorkbook(wb, 'upload');
-
-    // Persist to app/data/BOM.xlsx
-    const targetPath = path.join(__dirname, '..', 'data', 'BOM.xlsx');
-    fs.writeFileSync(targetPath, buffer);
-
-    res.json({ ok: true, count: result.count, product: result.product, filename });
-  } catch (e) {
-    res.status(400).json({ error: 'خطا در بارگذاری فایل اکسل BOM: ' + e.message });
-  }
-});
-
-// Proxy Bridge Login Status
-app.get('/api/bridge/status', async (req, res) => {
-  try {
-    const r = await fetch(`${BRIDGE_URL}/login-status`);
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.json({ ok: false, error: 'پل وب در دسترس نیست یا در حال راه‌اندازی است.' });
-  }
-});
-
-// DTC API
-app.get('/api/dtc/list', (req, res) => {
-  res.json(DTC_DATABASE);
-});
-
-app.get('/api/dtc/lookup', (req, res) => {
-  const code = (req.query.code || '').toString();
-  const match = lookupDtc(code);
-  res.json({ match });
-});
-
-// Pinout API
-app.get('/api/pinouts', (req, res) => {
-  res.json(PINOUTS_DATABASE);
-});
-
-app.get('/api/pinouts/:partCode', (req, res) => {
-  const match = getPinoutData(req.params.partCode);
-  res.json({ match });
-});
-
-// Database endpoints
-app.get('/api/db/stats', (req, res) => {
-  res.json(getDbStats());
-});
-
-app.get('/api/db/cases', (req, res) => {
-  res.json(getAllCases(50));
-});
-
-app.post('/api/db/cases/feedback', (req, res) => {
-  const { id, user_confirmed, user_feedback, root_cause } = req.body || {};
-  if (!id) return res.status(400).json({ error: 'id is required' });
-  updateCaseFeedback(id, { user_confirmed, user_feedback, root_cause });
-  res.json({ ok: true });
-});
-
-app.get('/api/db/knowledge', (req, res) => {
-  res.json(getUserKnowledgeList());
-});
-
-app.post('/api/db/knowledge', (req, res) => {
-  const { title, symptom_trigger, root_cause, solution, part_code } = req.body || {};
-  if (!title && !root_cause) return res.status(400).json({ error: 'title and root_cause are required' });
-  const item = addUserKnowledge({ title, symptom_trigger, root_cause, solution, part_code });
-  res.json({ ok: true, item });
-});
-
-app.delete('/api/db/knowledge/:id', (req, res) => {
-  deleteUserKnowledge(req.params.id);
-  res.json({ ok: true });
-});
-
-// Database Export & Import
-app.get('/api/db/export', (req, res) => {
-  const knowledge = getUserKnowledgeList();
-  const cases = getAllCases(200);
-  res.setHeader('Content-Disposition', 'attachment; filename="diagnostic_learning_db.json"');
-  res.setHeader('Content-Type', 'application/json');
-  res.json({ exported_at: new Date().toISOString(), stats: getDbStats(), user_knowledge: knowledge, cases });
-});
-
-app.post('/api/db/import', (req, res) => {
-  try {
-    const data = req.body || {};
-    let countK = 0, countC = 0;
-    if (Array.isArray(data.user_knowledge)) {
-      for (const k of data.user_knowledge) {
-        addUserKnowledge(k);
-        countK++;
-      }
-    }
-    if (Array.isArray(data.cases)) {
-      for (const c of data.cases) {
-        saveCase(c);
-        countC++;
-      }
-    }
-    res.json({ ok: true, imported_knowledge: countK, imported_cases: countC, stats: getDbStats() });
-  } catch (e) {
-    res.status(400).json({ error: 'خطا در واردسازی دیتابیس: ' + e.message });
-  }
-});
-
-// Part analysis
+// ---- Part analysis: user gives Part Name + Part No. -> result ----
 app.post('/api/part/analyze', async (req, res) => {
   try {
     const partName = (req.body?.part_name || '').toString().trim();
     const partNo = (req.body?.part_no || '').toString().trim();
-    const useBom = req.body?.use_bom !== false;
     if (!partName && !partNo) return res.status(400).json({ error: 'part_name or part_no required' });
 
-    const bomMatch = useBom ? findBomPart(partName, partNo) : null;
+    const bomMatch = findBomPart(partName, partNo);
     const cats = issuesForPart(
       partName || bomMatch?.part_name_en || '',
       partNo || bomMatch?.part_no || bomMatch?.part_code || ''
     );
-    const pinout = getPinoutData(partNo || bomMatch?.part_no || bomMatch?.part_code);
-    const learned = findLearnedMemory(`${partName} ${partNo}`, 'electrical', partNo || bomMatch?.part_code);
 
     const base = {
       query: { part_name: partName, part_no: partNo },
       bom_match: bomMatch,
-      pinout: pinout,
       known_issues: cats.map((c) => ({
         category: c.title_fa,
         updated_at: c.updated_at,
         issues: c.issues,
         sources: c.sources || [],
       })),
-      learned_memory: learned,
       db_updated_at: KNOWN_ISSUES.updated_at,
     };
 
+    // optional model synthesis (skipped in demo or when model unreachable)
     const cfg = getLlmConfig(req);
     let analysis = null;
-    if (!cfg.offline && (cfg.apiKey || !cfg.needsKey)) {
+    if (!cfg.demo && (cfg.apiKey || !cfg.needsKey)) {
       try {
         analysis = await callJson({
           cfg,
           model: cfg.chatModel,
           system: PART_ANALYZER,
           user: JSON.stringify({
-            product: useBom ? BOM_PRODUCT : '',
+            product: BOM_PRODUCT,
             part_name: partName || bomMatch?.part_name_en,
             part_no: partNo || bomMatch?.part_no,
             bom_match: bomMatch,
             known_issue_categories: base.known_issues,
-            learned_memory: learned,
             language: 'fa',
           }),
           temperature: 0.1,
           maxTokens: 2500,
         });
       } catch (e) {
-        analysis = null;
+        analysis = { unavailable: true, reason: e.message };
       }
-    }
-    // If no remote analysis, generate offline summary
-    if (!analysis) {
-      analysis = {
-        summary: `تحلیل فنی قطعه ${partName || bomMatch?.part_name_en || partNo}: بر اساس داده‌های پایگاه دانش، مودهای خرابی متداول شامل ترک‌خوردگی تحت تنش خمشی، نقص اتصال لحیم در فرآیند مونتاژ SMD و آسیب‌های ناشی از شوک ولتاژی/ESD می‌باشد.`,
-        critical_checks: [
-          'بررسی پلاریته و جهت صحیح مونتاژ قطعه روی برد',
-          'تست امپدانس و عدم وجود اتصال کوتاه به زمین (GND)',
-          'بازرسی چشمی میکروسکوپی پایه‌ها از نظر قلع‌مردگی یا پل قلع',
-          'اندازه‌گیری ولتاژ و ریپل در نقطه تست (Test Point) مربوطه',
-        ],
-        failure_modes: cats.flatMap((c) => c.issues.map((i) => i.issue_fa)).slice(0, 4),
-      };
     }
     res.json({ ...base, analysis });
   } catch (e) {
@@ -790,32 +597,66 @@ app.post('/api/part/analyze', async (req, res) => {
   }
 });
 
-// Session start
+// ---- Known-issues refresh: keep the DB up to date via the configured model ----
+app.post('/api/known-issues/refresh', async (req, res) => {
+  try {
+    const cfg = getLlmConfig(req);
+    if (cfg.demo) return res.status(400).json({ error: 'demo_mode', detail: 'برای بروزرسانی، مدل واقعی (ابری/کروم/لوکال) لازم است.' });
+    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
+
+    const onlyId = (req.body?.category_id || '').toString().trim();
+    const targets = (KNOWN_ISSUES.categories || []).filter((c) => !onlyId || c.id === onlyId);
+    if (!targets.length) return res.status(404).json({ error: 'category_not_found' });
+
+    const results = [];
+    for (const cat of targets.slice(0, 4)) { // cap per call to keep it fast
+      const parsed = await callJson({
+        cfg,
+        model: cfg.chatModel,
+        system: ISSUE_UPDATER,
+        user: JSON.stringify({
+          category: cat.title_fa,
+          match: cat.match,
+          current_issues: cat.issues,
+          product: BOM_PRODUCT,
+          language: 'fa',
+        }),
+        temperature: 0.1,
+        maxTokens: 2500,
+      });
+      if (parsed && Array.isArray(parsed.issues) && parsed.issues.length) {
+        cat.issues = parsed.issues.filter((i) => i.issue_fa);
+        cat.updated_at = new Date().toISOString().slice(0, 10);
+        results.push({ id: cat.id, updated: true, count: cat.issues.length });
+      } else {
+        results.push({ id: cat.id, updated: false });
+      }
+    }
+    saveKnownIssues();
+    res.json({ ok: true, results, db_updated_at: KNOWN_ISSUES.updated_at });
+  } catch (e) {
+    handleError(res, e);
+  }
+});
+
 app.post('/api/session/start', async (req, res) => {
   try {
     const symptom = (req.body?.symptom || '').toString().trim();
-    const dtc = (req.body?.dtc || '').toString().trim();
-    if (!symptom && !dtc) return res.status(400).json({ error: 'symptom is required' });
+    if (!symptom) return res.status(400).json({ error: 'symptom is required' });
     const cfg = getLlmConfig(req);
+    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
 
-    let fullSymptom = symptom;
-    if (dtc) {
-      const dtcInfo = lookupDtc(dtc);
-      const dtcDesc = dtcInfo ? ` [کد خطای دیاگ ${dtcInfo.code}: ${dtcInfo.desc_fa}]` : ` [DTC: ${dtc}]`;
-      fullSymptom = `${dtcDesc} ${symptom}`;
-    }
-
-    const useBom = req.body?.use_bom !== false;
-    const maxQuestions = Number(req.body?.max_questions) || DEFAULT_MAX_QUESTIONS;
-    const state = newState(fullSymptom, 'fa', useBom, maxQuestions);
+    const language = req.body?.language === 'en' || req.body?.language === 'fa'
+      ? req.body.language
+      : detectLanguage(symptom);
+    const state = newState(symptom, language);
     const id = crypto.randomUUID();
     sessions.set(id, state);
 
-    // immediate safety screen
-    if (quickSafetyCheck(fullSymptom)) {
+    // immediate safety screen (code-level, before any model call)
+    if (quickSafetyCheck(symptom)) {
       state.phase = 'escalated';
-      saveCase({ id, symptom: state.symptom, system: state.system, findings: [], root_causes: [{ cause: 'ارجاع فوری به دلیل ریسک ایمنی', confidence: 99 }] });
-      return res.json({ sessionId: id, ...escalationPayload(), state: publicState(state) });
+      return res.json({ sessionId: id, ...escalationPayload(language), state: publicState(state) });
     }
 
     const step = await nextStep(cfg, state);
@@ -825,7 +666,6 @@ app.post('/api/session/start', async (req, res) => {
   }
 });
 
-// Session answer
 app.post('/api/session/answer', async (req, res) => {
   try {
     const id = (req.body?.sessionId || '').toString();
@@ -834,6 +674,8 @@ app.post('/api/session/answer', async (req, res) => {
     if (state.phase !== 'interview') return res.status(400).json({ error: 'session_closed' });
 
     const cfg = getLlmConfig(req);
+    if (cfg.needsKey && !cfg.apiKey) return res.status(401).json({ error: 'missing_api_key' });
+
     const answer = (req.body?.answer || '').toString().trim();
     const freeText = (req.body?.freeText || '').toString().trim();
     if (!answer && !freeText) return res.status(400).json({ error: 'answer is required' });
@@ -846,10 +688,10 @@ app.post('/api/session/answer', async (req, res) => {
     state.question_count += 1;
     state.pending_question = null;
 
+    // code-level safety screen on free-text answers
     if (quickSafetyCheck(finalAnswer)) {
       state.phase = 'escalated';
-      saveCase({ id, symptom: state.symptom, system: state.system, findings: state.findings, root_causes: [{ cause: 'ارجاع فوری به دلیل ریسک ایمنی', confidence: 99 }] });
-      return res.json({ sessionId: id, ...escalationPayload(), state: publicState(state) });
+      return res.json({ sessionId: id, ...escalationPayload(state.language), state: publicState(state) });
     }
 
     const step = await nextStep(cfg, state);
@@ -859,92 +701,26 @@ app.post('/api/session/answer', async (req, res) => {
   }
 });
 
-// Extend questions
-app.post('/api/session/extend', async (req, res) => {
-  try {
-    const id = (req.body?.sessionId || '').toString();
-    const state = sessions.get(id);
-    if (!state) return res.status(404).json({ error: 'session_not_found' });
-
-    const extendBy = Number(req.body?.extend_by) || 4;
-    state.max_questions = (state.max_questions || DEFAULT_MAX_QUESTIONS) + extendBy;
-    state.phase = 'interview';
-
-    const cfg = getLlmConfig(req);
-    const step = await nextStep(cfg, state);
-    return handleStep(res, id, state, step, cfg);
-  } catch (e) {
-    handleError(res, e);
-  }
-});
-
-// Conclude interview on demand
-app.post('/api/session/conclude', async (req, res) => {
-  try {
-    const id = (req.body?.sessionId || '').toString();
-    const state = sessions.get(id);
-    if (!state) return res.status(404).json({ error: 'session_not_found' });
-
-    const cfg = getLlmConfig(req);
-    const report = await finalReport(cfg, state);
-    state.phase = 'concluded';
-
-    saveCase({
-      id,
-      symptom: state.symptom,
-      system: state.system,
-      findings: state.findings,
-      root_causes: report.root_causes,
-    });
-
-    return res.json({
-      sessionId: id,
-      concluded: true,
-      report,
-      savedToDb: true,
-      state: publicState(state),
-    });
-  } catch (e) {
-    handleError(res, e);
-  }
-});
-
 async function handleStep(res, id, state, step, cfg) {
   if (step.escalate) {
     state.phase = 'escalated';
-    saveCase({ id, symptom: state.symptom, system: state.system, findings: state.findings, root_causes: [{ cause: step.reason || 'ارجاع فوری', confidence: 99 }] });
-    return res.json({ sessionId: id, ...escalationPayload(step.reason), state: publicState(state) });
+    return res.json({ sessionId: id, ...escalationPayload(state.language, step.reason), state: publicState(state) });
   }
-  if (step.conclude || state.question_count >= state.max_questions) {
+  if (step.conclude || state.question_count >= MAX_QUESTIONS) {
     applyStateUpdates(state, step);
     const report = await finalReport(cfg, state);
     state.phase = 'concluded';
-
-    saveCase({
-      id,
-      symptom: state.symptom,
-      system: state.system,
-      findings: state.findings,
-      root_causes: report.root_causes,
-    });
-
-    return res.json({
-      sessionId: id,
-      concluded: true,
-      report,
-      savedToDb: true,
-      state: publicState(state),
-    });
+    return res.json({ sessionId: id, concluded: true, report, state: publicState(state) });
   }
   applyStateUpdates(state, step);
-  const options = ensureFallbackOption(step.options);
+  const options = ensureFallbackOption(step.options, state.language);
   state.pending_question = { question: step.question, options };
   return res.json({
     sessionId: id,
     question: step.question,
     options,
     questionNumber: state.question_count + 1,
-    maxQuestions: state.max_questions,
+    maxQuestions: MAX_QUESTIONS,
     state: publicState(state),
   });
 }
@@ -954,13 +730,10 @@ function publicState(state) {
     symptom: state.symptom,
     system: state.system,
     language: state.language,
-    use_bom: state.use_bom,
-    max_questions: state.max_questions,
-    learned_memory: state.learned_memory,
     question_count: state.question_count,
     leading_hypotheses: state.leading_hypotheses,
     ruled_out: state.ruled_out,
-    bom_parts: state.use_bom ? bomPartsForModel(state.system) : [],
+    bom_parts: bomPartsForModel(state.system),
     phase: state.phase,
   };
 }
@@ -970,15 +743,15 @@ function handleError(res, e) {
   if (e.status === 401 || e.status === 403) {
     return res.status(401).json({ error: 'invalid_api_key', detail: e.message });
   }
-  if (e.status === 429) {
-    return res.status(429).json({ error: 'rate_limit_exceeded', detail: e.message });
+  if (e.status === 402) {
+    return res.status(402).json({ error: 'insufficient_balance', detail: e.message });
   }
   if (/fetch failed/i.test(e.message || '')) {
-    return res.status(502).json({ error: 'network_error', detail: 'اتصال به مدل هوش مصنوعی برقرار نشد. شبکه را بررسی کنید یا از موتور آفلاین استفاده نمایید.' });
+    return res.status(502).json({ error: 'network_error', detail: 'Cannot reach the model server (DeepSeek API or local endpoint). Check network/base URL, make sure the local server (e.g. Ollama) is running, or use the key "demo" for demo mode.' });
   }
   return res.status(500).json({ error: 'server_error', detail: e.message });
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Guided Diagnostic Assistant listening on http://0.0.0.0:${PORT} (Default Model: DeepSeek Selenium Chrome Bridge)`);
+  console.log(`Guided Diagnostic Assistant listening on http://0.0.0.0:${PORT}`);
 });
